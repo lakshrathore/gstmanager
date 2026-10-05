@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { call } from '@/lib/client';
 
-export function Sidebar({ user, canManageTeam, canReset }: { user: { name: string; role: string }; canManageTeam: boolean; canReset: boolean }) {
+export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name: string; role: string }; plan: string | null; canManageTeam: boolean; canReset: boolean }) {
   const path = usePathname();
   const router = useRouter();
   const links = [
@@ -12,6 +12,7 @@ export function Sidebar({ user, canManageTeam, canReset }: { user: { name: strin
     { href: '/companies', label: 'Companies' },
     { href: '/tools', label: 'Validators' },
     ...(canManageTeam ? [{ href: '/team', label: 'Team' }] : []),
+    { href: '/license', label: 'License' },
     ...(canReset ? [{ href: '/settings', label: 'Settings' }] : []),
   ];
   const active = (h: string) => (h === '/' ? path === '/' || path.startsWith('/returns') : path.startsWith(h));
@@ -29,6 +30,7 @@ export function Sidebar({ user, canManageTeam, canReset }: { user: { name: strin
       <div className="hidden text-[12.5px] text-white/60 md:mt-auto md:block">
         <p className="text-white">{user.name}</p>
         <p className="capitalize">{user.role}</p>
+        <p className="mt-1">{plan ? `${plan} plan` : 'No active license'}</p>
         <button className="mt-3 text-white/80 underline hover:text-white" onClick={async () => { await call('/api/auth/logout', { method: 'POST' }); router.replace('/login'); }}>Sign out</button>
       </div>
     </aside>

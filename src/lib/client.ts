@@ -13,8 +13,8 @@ export async function call<T = unknown>(url: string, init: RequestInit & { json?
     headers: json !== undefined ? { 'content-type': 'application/json', ...rest.headers } : rest.headers,
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   });
-  if (res.status === 401 && typeof window !== 'undefined' && !url.startsWith('/api/auth/')) {
-    window.location.href = '/login';
+  if (res.status === 401 && typeof window !== 'undefined' && !url.startsWith('/api/auth/') && !url.startsWith('/api/admin/auth/')) {
+    window.location.href = url.startsWith('/api/admin/') ? '/admin/login' : '/login';
   }
   const body = res.headers.get('content-type')?.includes('json') ? await res.json() : await res.text();
   if (!res.ok) throw new ApiError(res.status, (body as { error?: string })?.error ?? `Request failed (${res.status})`, (body as { details?: unknown })?.details);

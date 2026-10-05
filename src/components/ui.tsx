@@ -49,6 +49,20 @@ export function StatusBadge({ status }: { status: string }) {
   return <span className={`inline-block rounded px-2 py-0.5 text-[12px] font-medium ${STATUS_TONE[status] ?? 'bg-black/5 text-ink-soft'}`}>{(STATUS_LABEL as Record<string, string>)[status] ?? status}</span>;
 }
 
+const LICENSE_TONE: Record<string, [string, string]> = {
+  active: ['bg-ledger-tint text-ledger', 'Active'], unused: ['bg-black/5 text-ink-soft', 'Unused'],
+  expired: ['bg-red-tint text-red-ink', 'Expired'], suspended: ['bg-amber-tint text-amber', 'Suspended'],
+  revoked: ['bg-red-tint text-red-ink', 'Revoked'], replaced: ['bg-black/5 text-ink-soft', 'Replaced'], none: ['bg-red-tint text-red-ink', 'No license'],
+};
+
+export function LicenseBadge({ status }: { status: string }) {
+  const [tone, label] = LICENSE_TONE[status] ?? ['bg-black/5 text-ink-soft', status];
+  return <span className={`inline-block whitespace-nowrap rounded px-2 py-0.5 text-[12px] font-medium ${tone}`}>{label}</span>;
+}
+
+export const fmtDate = (d: string | Date | null | undefined) =>
+  d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
 export function Severity({ s }: { s: string }) {
   return s === 'error'
     ? <span className="rounded bg-red-tint px-1.5 py-0.5 text-[12px] font-medium text-red-ink">Error</span>

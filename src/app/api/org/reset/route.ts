@@ -9,4 +9,4 @@ const Body = z.object({ confirm: z.string().max(40), password: z.string().min(1)
 
 /** Deletes all of the organisation's data (owner only, phrase + password). */
 export const POST = api('org:reset', async (req, { auth }) => resetOrganisation(auth, Body.parse(await req.json())),
-  { rateLimit: { key: 'org-reset', max: 5, windowMs: 10 * 60_000 } });
+  { unlicensed: true, rateLimit: { key: 'org-reset', max: 5, windowMs: 10 * 60_000 } });

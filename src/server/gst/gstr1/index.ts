@@ -7,6 +7,7 @@ import {
 import { canAccessCompany, type Auth } from '../../auth';
 import { sha256 } from '../../crypto';
 import { HttpError } from '../../http';
+import { assertWithinLimit } from '../../license';
 import {
   Company, GeneratedJson, GstReturn, Gstr1Error, Gstr1Record, oid,
   type CompanyDoc, type GstReturnDoc,
@@ -60,6 +61,7 @@ export async function createReturn(auth: Auth, companyId: string, fp: string) {
   if (quarterly && !['03', '06', '09', '12'].includes(fp.slice(0, 2))) throw new HttpError(400, 'Quarterly filers must pick the quarter-ending month');
   const existing = await GstReturn.findOne({ orgId: oid(auth.orgId), companyId: company._id, fp }).lean();
   if (existing) return existing;
+  await assertWithinLimit(auth.orgId, 'returnsPerMonth');
   const ret = await GstReturn.create({
     orgId: oid(auth.orgId), companyId: company._id, gstin: company.gstin, fp, quarterly,
     fy: financialYear(periodBounds(fp).start), profileId: profileForPeriod(fp).id,

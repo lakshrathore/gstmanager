@@ -11,4 +11,4 @@ export const POST = api('return:view', async (req) => {
   if (!list.length) throw new HttpError(400, 'Enter at least one GSTIN');
   if (list.length > gstinLookup.MAX_BATCH) throw new HttpError(400, `Enter up to ${gstinLookup.MAX_BATCH} GSTINs at a time`);
   return { results: b.mode === 'sandbox' ? await gstinLookup.checkWithSandbox(list) : gstinLookup.checkOffline(list) };
-}, { rateLimit: { key: 'tools-gstin', max: 20, windowMs: 60_000 } });
+}, { feature: 'validators', rateLimit: { key: 'tools-gstin', max: 20, windowMs: 60_000 } });

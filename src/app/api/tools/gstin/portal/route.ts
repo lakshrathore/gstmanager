@@ -12,4 +12,4 @@ const Body = z.object({
 export const POST = api('return:view', async (req, { auth }) => {
   const b = Body.parse(await req.json());
   return { result: await gstinLookup.portalSearch(auth.userId, b.sessionId, b.gstin, b.captcha) };
-}, { rateLimit: { key: 'tools-portal', max: 40, windowMs: 60_000 } });
+}, { feature: 'validators', rateLimit: { key: 'tools-portal', max: 40, windowMs: 60_000 } });

@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { audit } from '@/server/gst/gst-audit';
 import { api, HttpError } from '@/server/http';
+import { assertWithinLimit } from '@/server/license';
 import { oid, ROLES, User } from '@/server/models';
 
 export const GET = api('org:manage', async (_req, { auth }) => ({
@@ -19,6 +20,7 @@ const Body = z.object({
 export const POST = api('org:manage', async (req, { auth }) => {
   const b = Body.parse(await req.json());
   if (await User.exists({ email: b.email.toLowerCase() })) throw new HttpError(409, 'Email already registered');
+  await assertWithinLimit(auth.orgId, 'users');
   const u = await User.create({ ...b, orgId: oid(auth.orgId), companyIds: b.companyIds.map(oid).filter(Boolean), passwordHash: await bcrypt.hash(b.password, 12) });
   await audit(auth, 'user.create', 'User', String(u._id), { email: u.email, role: u.role });
   return { user: { _id: u._id, email: u.email, name: u.name, role: u.role } };

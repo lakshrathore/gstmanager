@@ -10,7 +10,14 @@ function model<T>(name: string, schema: Schema<T>): Model<T> {
 
 /* Tenancy & access */
 
-const OrganizationSchema = new Schema({ name: { type: String, required: true } }, ts);
+const OrganizationSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    /** The license currently in force (see src/server/license.ts). */
+    licenseId: { type: ObjectId },
+  },
+  ts,
+);
 
 export const ROLES = ['owner', 'admin', 'preparer', 'reviewer', 'viewer'] as const;
 export type Role = (typeof ROLES)[number];
@@ -239,6 +246,63 @@ const GstProfileSchema = new Schema(
 );
 GstProfileSchema.index({ orgId: 1, companyId: 1 }, { unique: true });
 
+/* Platform: super admin, packages and licenses (not scoped to an org) */
+
+/** Software owner. Separate from org users; signs in at /admin. */
+const SuperAdminSchema = new Schema(
+  {
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    name: { type: String, default: 'Super Admin' },
+    passwordHash: { type: String, required: true, select: false },
+    active: { type: Boolean, default: true },
+    lastLoginAt: Date,
+  },
+  ts,
+);
+
+export const FEATURE_KEYS = ['validators', 'gstApi'] as const;
+export type FeatureKey = (typeof FEATURE_KEYS)[number];
+
+/** A sellable plan. 0 in a limit means unlimited. */
+const PackageSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    description: String,
+    priceInr: { type: Number, default: 0 },
+    durationDays: { type: Number, required: true },
+    limits: {
+      companies: { type: Number, default: 0 },
+      users: { type: Number, default: 0 },
+      returnsPerMonth: { type: Number, default: 0 },
+    },
+    features: [{ type: String, enum: FEATURE_KEYS }],
+    /** Given automatically to new sign-ups. */
+    isTrial: { type: Boolean, default: false },
+    /** Archived packages keep working for existing licenses but cannot be issued. */
+    active: { type: Boolean, default: true },
+  },
+  ts,
+);
+
+export const LICENSE_STATUSES = ['unused', 'active', 'suspended', 'revoked', 'replaced'] as const;
+
+const LicenseSchema = new Schema(
+  {
+    key: { type: String, required: true, unique: true },
+    packageId: { type: ObjectId, required: true, index: true },
+    durationDays: { type: Number, required: true },
+    status: { type: String, enum: LICENSE_STATUSES, default: 'unused' },
+    orgId: { type: ObjectId, index: true },
+    activatedAt: Date,
+    expiresAt: Date,
+    /** Customer name / reference, for the super admin's records. */
+    issuedTo: String,
+    note: String,
+    createdBy: ObjectId,
+  },
+  ts,
+);
+
 /* Audit (append-only, hash-chained per org) */
 
 const AuditLogSchema = new Schema({
@@ -275,6 +339,9 @@ export const PortalEvidence = model('PortalEvidence', PortalEvidenceSchema);
 export const GstApiSession = model('GstApiSession', GstApiSessionSchema);
 export const GstSession = model('GstSession', GstSessionSchema);
 export const GstProfile = model('GstProfile', GstProfileSchema);
+export const SuperAdmin = model('SuperAdmin', SuperAdminSchema);
+export const Package = model('Package', PackageSchema);
+export const License = model('License', LicenseSchema);
 export const AuditLog = model('AuditLog', AuditLogSchema);
 
 export type CompanyDoc = InferSchemaType<typeof CompanySchema> & { _id: Types.ObjectId };

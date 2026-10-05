@@ -13,4 +13,4 @@ const Body = z.object({
 export const POST = api('return:view', async (req, { auth }) => {
   const { text, ...settings } = Body.parse(await req.json());
   return jsonCheck.fixJson(auth, text, settings);
-}, { rateLimit: { key: 'tools-json', max: 30, windowMs: 60_000 } });
+}, { feature: 'validators', rateLimit: { key: 'tools-json', max: 30, windowMs: 60_000 } });

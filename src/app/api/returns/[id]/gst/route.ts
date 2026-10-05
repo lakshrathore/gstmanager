@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { can } from '@/server/auth';
 import { api, HttpError } from '@/server/http';
+import { requireLicense } from '@/server/license';
 import { endLogin, requestLoginOtp, verifyLoginOtp } from '@/server/gst/gst-login';
 import {
   addNote, cancelUpload, checkGstnStatus, confirmUploaded, fetchArn, fetchGstnSummary, fileWithEvc, markProcessing, markReady,
@@ -17,6 +18,9 @@ import {
 export const GET = api('return:view', async (_req, { auth, params }) => ({
   ...(await portalOverview(auth, params.id)), canOperate: can(auth, 'portal:operate'), canFile: can(auth, 'return:file'),
 }));
+
+/** Actions that call GSTN through the API integration – need the plan's gstApi feature. */
+const API_ACTIONS = new Set(['login_otp', 'login_verify', 'logout', 'check_status', 'proceed_to_file', 'fetch_summary', 'request_evc_otp', 'file_return', 'fetch_arn']);
 
 const Body = z.discriminatedUnion('action', [
   z.object({ action: z.literal('mark_ready'), note: z.string().max(500).optional() }),
@@ -57,6 +61,7 @@ export const POST = api('portal:operate', async (req, { auth, params }) => {
   const b = Body.parse(body);
   const id = params.id;
   const opt = (s?: string) => (s && s.trim() ? s : undefined);
+  if (API_ACTIONS.has(b.action)) await requireLicense(auth.orgId, 'gstApi');
   switch (b.action) {
     case 'mark_ready': await markReady(auth, id, opt(b.note)); break;
     case 'start_upload': return startUpload(auth, id);

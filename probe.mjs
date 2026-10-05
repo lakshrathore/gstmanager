@@ -1,0 +1,10 @@
+const jar = new Map();
+const absorb = (r) => { for (const c of r.headers.getSetCookie()) { const kv = c.split(';')[0]; const i = kv.indexOf('='); jar.set(kv.slice(0,i), kv.slice(i+1)); } };
+const ck = () => [...jar].map(([k,v]) => `${k}=${v}`).join('; ');
+const p = await fetch('https://services.gst.gov.in/services/searchtp', { headers: { accept: 'text/html' }, signal: AbortSignal.timeout(20000) });
+absorb(p); console.log('page', p.status, [...jar.keys()]);
+const c = await fetch('https://services.gst.gov.in/services/captcha?rnd=' + Math.random(), { headers: { accept: 'image/*', referer: 'https://services.gst.gov.in/services/searchtp', cookie: ck() }, signal: AbortSignal.timeout(20000) });
+absorb(c); const b = Buffer.from(await c.arrayBuffer());
+console.log('captcha', c.status, c.headers.get('content-type'), b.length, 'bytes', [...jar.keys()]);
+const s = await fetch('https://services.gst.gov.in/services/api/search/taxpayerDetails', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', referer: 'https://services.gst.gov.in/services/searchtp', origin: 'https://services.gst.gov.in', cookie: ck() }, body: JSON.stringify({ gstin: '33ABKCS2033B1ZW', captcha: '000000' }), signal: AbortSignal.timeout(20000) });
+console.log('search (deliberately wrong captcha)', s.status, (await s.text()).slice(0, 300));

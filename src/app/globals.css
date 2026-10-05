@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* Ledger palette: cool paper, teal ink, red-ink errors */
+:root {
+  --paper: #f3f6f5;
+  --sheet: #ffffff;
+  --ink: #17302d;
+  --ink-soft: #4f6461;
+  --rule: #d6dfdc;
+  --ledger: #0e6b5c;
+  --ledger-tint: #e2f0ec;
+  --red-ink: #b3261e;
+  --red-tint: #fbe9e7;
+  --amber: #9a6410;
+  --amber-tint: #fbf1dc;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-rule: var(--rule);
+  --color-ledger: var(--ledger);
+  --color-ledger-tint: var(--ledger-tint);
+  --color-red-ink: var(--red-ink);
+  --color-red-tint: var(--red-tint);
+  --color-amber: var(--amber);
+  --color-amber-tint: var(--amber-tint);
+  --font-sans: "Instrument Sans Variable", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@layer base {
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+:focus-visible { outline: 2px solid var(--ledger); outline-offset: 2px; }
+
+input, select, textarea {
+  border: 1px solid var(--rule); background: #fff; border-radius: 6px; padding: 6px 9px; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--ledger); outline-offset: -1px; border-color: transparent; }
+label { font-size: 12.5px; color: var(--ink-soft); display: grid; gap: 4px; }
+
+table.ledger { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.ledger th { text-align: left; font-weight: 600; color: var(--ink-soft); padding: 8px 10px; border-bottom: 2px solid var(--ink); white-space: nowrap; }
+table.ledger td { padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.ledger tr.row-error td:first-child { box-shadow: inset 3px 0 0 var(--red-ink); }
+table.ledger tbody tr:hover { background: #f7faf9; }
+
+}
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

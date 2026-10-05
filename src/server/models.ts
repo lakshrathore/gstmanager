@@ -211,6 +211,34 @@ const GstApiSessionSchema = new Schema(
 );
 GstApiSessionSchema.index({ orgId: 1, companyId: 1 }, { unique: true });
 
+/** GST portal (browser-protocol) session per company. The cookie jar is encrypted and never leaves the server. */
+const GstSessionSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    gstin: { type: String, required: true },
+    state: { type: String, enum: ['captcha_required', 'otp_required', 'active', 'failed', 'expired', 'none'], default: 'none' },
+    jarEnc: { type: String, select: false },
+    expiresAt: Date,
+    lastActivityAt: Date,
+    message: String,
+    startedBy: ObjectId,
+  },
+  ts,
+);
+GstSessionSchema.index({ orgId: 1, companyId: 1 }, { unique: true });
+
+/** Saved (encrypted) GST portal username per company, when the user opts to remember it. */
+const GstProfileSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    usernameEnc: String,
+  },
+  ts,
+);
+GstProfileSchema.index({ orgId: 1, companyId: 1 }, { unique: true });
+
 /* Audit (append-only, hash-chained per org) */
 
 const AuditLogSchema = new Schema({
@@ -245,6 +273,8 @@ export const GeneratedJson = model('GeneratedJson', GeneratedJsonSchema);
 export const UploadJob = model('UploadJob', UploadJobSchema);
 export const PortalEvidence = model('PortalEvidence', PortalEvidenceSchema);
 export const GstApiSession = model('GstApiSession', GstApiSessionSchema);
+export const GstSession = model('GstSession', GstSessionSchema);
+export const GstProfile = model('GstProfile', GstProfileSchema);
 export const AuditLog = model('AuditLog', AuditLogSchema);
 
 export type CompanyDoc = InferSchemaType<typeof CompanySchema> & { _id: Types.ObjectId };

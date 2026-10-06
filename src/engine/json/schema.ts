@@ -46,6 +46,108 @@ const advance = {
   },
 };
 
+/* Amendment sections (GSTN "Save GSTR1" v4.1: 9A b2ba/b2cla/expa, 9C cdnra/cdnura, 10 b2csa, 11 ata/txpda). */
+const omon = { type: 'string', pattern: '^(0[1-9]|1[0-2])\\d{4}$' };
+const flatItms = (keys: Record<string, unknown>, required: string[]) => ({
+  type: 'array', minItems: 1, items: { type: 'object', required, properties: keys, additionalProperties: false },
+});
+const amendedAdvance = {
+  type: 'array',
+  items: {
+    type: 'object', required: ['omon', 'pos', 'sply_ty', 'itms'],
+    properties: { omon, pos, sply_ty: { enum: ['INTER', 'INTRA'] }, ...diff, itms: flatItms({ rt: { type: 'number' }, ad_amt: money, ...tax }, ['rt', 'ad_amt']) },
+    additionalProperties: false,
+  },
+};
+const AMENDMENT_SCHEMA = {
+  b2ba: {
+    type: 'array',
+    items: {
+      type: 'object', required: ['ctin', 'inv'],
+      properties: {
+        ctin: gstin,
+        inv: {
+          type: 'array', minItems: 1,
+          items: {
+            type: 'object', required: ['oinum', 'oidt', 'inum', 'idt', 'val', 'pos', 'rchrg', 'inv_typ', 'itms'],
+            properties: { oinum: docNo, oidt: date, inum: docNo, idt: date, val: money, pos, rchrg: { enum: ['Y', 'N'] }, etin: gstin, inv_typ: { enum: ['R', 'SEWP', 'SEWOP', 'DE', 'CBW'] }, ...diff, itms },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  b2cla: {
+    type: 'array',
+    items: {
+      type: 'object', required: ['pos', 'inv'],
+      properties: {
+        pos,
+        inv: { type: 'array', minItems: 1, items: { type: 'object', required: ['oinum', 'oidt', 'inum', 'idt', 'val', 'itms'], properties: { oinum: docNo, oidt: date, inum: docNo, idt: date, val: money, etin: gstin, ...diff, itms }, additionalProperties: false } },
+      },
+      additionalProperties: false,
+    },
+  },
+  expa: {
+    type: 'array',
+    items: {
+      type: 'object', required: ['exp_typ', 'inv'],
+      properties: {
+        exp_typ: { enum: ['WPAY', 'WOPAY'] },
+        inv: {
+          type: 'array', minItems: 1,
+          items: {
+            type: 'object', required: ['oinum', 'oidt', 'inum', 'idt', 'val', 'itms'],
+            properties: { oinum: docNo, oidt: date, inum: docNo, idt: date, val: money, sbpcode: { type: 'string' }, sbnum: { type: 'string' }, sbdt: date, itms: flatItms({ txval: money, rt: { type: 'number' }, iamt: money, csamt: money }, ['txval', 'rt']) },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  cdnra: {
+    type: 'array',
+    items: {
+      type: 'object', required: ['ctin', 'nt'],
+      properties: {
+        ctin: gstin,
+        nt: {
+          type: 'array', minItems: 1,
+          items: {
+            type: 'object', required: ['ont_num', 'ont_dt', 'ntty', 'nt_num', 'nt_dt', 'val', 'pos', 'rchrg', 'inv_typ', 'itms'],
+            properties: { ont_num: docNo, ont_dt: date, ntty: { enum: ['C', 'D'] }, nt_num: docNo, nt_dt: date, val: money, pos, rchrg: { enum: ['Y', 'N'] }, inv_typ: { enum: ['R', 'SEWP', 'SEWOP', 'DE', 'CBW'] }, ...diff, itms },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  cdnura: {
+    type: 'array',
+    items: {
+      type: 'object', required: ['typ', 'ont_num', 'ont_dt', 'ntty', 'nt_num', 'nt_dt', 'val', 'itms'],
+      properties: { typ: { enum: ['B2CL', 'EXPWP', 'EXPWOP'] }, ont_num: docNo, ont_dt: date, ntty: { enum: ['C', 'D'] }, nt_num: docNo, nt_dt: date, val: money, pos, ...diff, itms },
+      additionalProperties: false,
+    },
+  },
+  b2csa: {
+    type: 'array',
+    items: {
+      type: 'object', required: ['omon', 'pos', 'sply_ty', 'typ', 'itms'],
+      properties: {
+        omon, pos, sply_ty: { enum: ['INTER', 'INTRA'] }, typ: { enum: ['OE', 'E'] }, etin: gstin, ...diff,
+        itms: flatItms({ rt: { type: 'number' }, txval: signedMoney, ...tax }, ['rt', 'txval']),
+      },
+      additionalProperties: false,
+    },
+  },
+  ata: amendedAdvance,
+  txpda: amendedAdvance,
+};
+
 export const GSTR1_SCHEMA = {
   $id: 'gstr1-upload',
   type: 'object',
@@ -140,6 +242,7 @@ export const GSTR1_SCHEMA = {
     },
     at: advance,
     txpd: advance,
+    ...AMENDMENT_SCHEMA,
     nil: {
       type: 'object', required: ['inv'],
       properties: {

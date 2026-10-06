@@ -2,7 +2,13 @@ import type { FormatProfile } from './config/versions';
 
 export const SECTIONS = [
   'b2b', 'b2cl', 'b2cs', 'cdnr', 'cdnur', 'exp', 'at', 'txpd', 'nil', 'hsn_b2b', 'hsn_b2c', 'docs',
+  'b2ba', 'b2cla', 'expa', 'cdnra', 'cdnura', 'b2csa', 'ata', 'txpda',
 ] as const;
+
+/** Amendment sections (Tables 9A, 9C, 10, 11) and the section each one amends. */
+export const AMENDS: Partial<Record<Section, Section>> = {
+  b2ba: 'b2b', b2cla: 'b2cl', expa: 'exp', cdnra: 'cdnr', cdnura: 'cdnur', b2csa: 'b2cs', ata: 'at', txpda: 'txpd',
+};
 export type Section = (typeof SECTIONS)[number];
 
 export const SECTION_LABELS: Record<Section, string> = {
@@ -18,6 +24,14 @@ export const SECTION_LABELS: Record<Section, string> = {
   hsn_b2b: '12 – HSN Summary (B2B)',
   hsn_b2c: '12 – HSN Summary (B2C)',
   docs: '13 – Documents Issued',
+  b2ba: '9A – Amended B2B invoices',
+  b2cla: '9A – Amended B2C Large invoices',
+  expa: '9A – Amended Export invoices',
+  cdnra: '9C – Amended Credit/Debit Notes (Registered)',
+  cdnura: '9C – Amended Credit/Debit Notes (Unregistered)',
+  b2csa: '10 – Amended B2C Others',
+  ata: '11A – Amended Advances Received',
+  txpda: '11B – Amended Advances Adjusted',
 };
 
 export type YN = 'Y' | 'N';
@@ -77,9 +91,19 @@ export interface DocData {
   docTyp: string; from: string; to: string; totnum: number | null; cancel: number | null;
 }
 
+/** Amended invoice: the revised document plus the original number and date (ISO). */
+export interface OriginalInvoice { oinum: string; oidt: string }
+/** Amended note: the revised note plus the original note number and date (ISO). */
+export interface OriginalNote { ontNum: string; ontDt: string }
+/** Amended summary rows (B2CS, advances): the original return period MMYYYY. */
+export interface OriginalMonth { omon: string }
+
 export interface SectionDataMap {
   b2b: B2bData; b2cl: B2clData; b2cs: B2csData; cdnr: CdnrData; cdnur: CdnurData; exp: ExpData;
   at: AdvanceData; txpd: AdvanceData; nil: NilData; hsn_b2b: HsnData; hsn_b2c: HsnData; docs: DocData;
+  b2ba: B2bData & OriginalInvoice; b2cla: B2clData & OriginalInvoice; expa: ExpData & OriginalInvoice;
+  cdnra: CdnrData & OriginalNote; cdnura: CdnurData & OriginalNote;
+  b2csa: B2csData & OriginalMonth; ata: AdvanceData & OriginalMonth; txpda: AdvanceData & OriginalMonth;
 }
 
 export interface SourceRef {

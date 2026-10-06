@@ -311,6 +311,14 @@ const BUILDERS: Record<Section, (rows: Row[], ctx: BuildCtx) => void> = {
       ctx.out.push({ section: 'nil', key: `nil|${data.splyTy}|${r.row}`, source: src(ctx, [r]), data });
     }
   },
+  b2ba: (rows, ctx) => amended('b2b', 'b2ba', origInvoice, (d) => `b2ba|${String(d.ctin).toUpperCase()}|${String(d.oinum).toUpperCase()}`)(rows, ctx),
+  b2cla: (rows, ctx) => amended('b2cl', 'b2cla', origInvoice, (d) => `b2cla|${String(d.oinum).toUpperCase()}`)(rows, ctx),
+  expa: (rows, ctx) => amended('exp', 'expa', origInvoice, (d) => `expa|${String(d.oinum).toUpperCase()}`)(rows, ctx),
+  cdnra: (rows, ctx) => amended('cdnr', 'cdnra', origNote, (d) => `cdnra|${String(d.ctin).toUpperCase()}|${String(d.ontNum).toUpperCase()}`)(rows, ctx),
+  cdnura: (rows, ctx) => amended('cdnur', 'cdnura', origNote, (d) => `cdnura|${String(d.ontNum).toUpperCase()}`)(rows, ctx),
+  b2csa: (rows, ctx) => amended('b2cs', 'b2csa', origMonth, (d) => `b2csa|${d.omon}|${d.typ}|${d.pos}|${d.rt}|${d.etin ?? ''}`, monthOf)(rows, ctx),
+  ata: (rows, ctx) => amended('at', 'ata', origMonth, (d) => `ata|${d.omon}|${d.pos}|${d.diffPercent ?? ''}`, monthOf)(rows, ctx),
+  txpda: (rows, ctx) => amended('txpd', 'txpda', origMonth, (d) => `txpda|${d.omon}|${d.pos}|${d.diffPercent ?? ''}`, monthOf)(rows, ctx),
   hsn_b2b: (rows, ctx) => buildHsn('hsn_b2b', rows, ctx),
   hsn_b2c: (rows, ctx) => buildHsn('hsn_b2c', rows, ctx),
   docs(rows, ctx) {
@@ -323,6 +331,48 @@ const BUILDERS: Record<Section, (rows: Row[], ctx: BuildCtx) => void> = {
     }
   },
 };
+
+/* ---------- amendments ---------- */
+
+const MONTHS: Record<string, string> = {
+  january: '01', february: '02', march: '03', april: '04', may: '05', june: '06', july: '07', august: '08', september: '09', october: '10', november: '11', december: '12',
+};
+
+/** "2025-26" + "JULY" (or "07") → "072025"; months Jan–Mar belong to the second year of the FY. */
+export function originalMonth(fy: unknown, month: unknown): string {
+  const m = str(month).toLowerCase();
+  const mm = MONTHS[m] ?? MONTHS[Object.keys(MONTHS).find((k) => k.startsWith(m.slice(0, 3)) && m.length >= 3) ?? ''] ?? (/^\d{1,2}$/.test(m) ? m.padStart(2, '0') : '');
+  const y = str(fy).match(/^(\d{4})/);
+  if (!mm || !y) return '';
+  const start = Number(y[1]);
+  return `${mm}${Number(mm) <= 3 ? start + 1 : start}`;
+}
+
+/** Builds an amendment section with the base section's builder, then adds the original-document fields. */
+function amended(base: Section, section: Section, extra: (first: Row, ctx: BuildCtx, section: Section) => Record<string, unknown>, keyOf: (data: Record<string, unknown>) => string, splitBy?: (r: Row) => string) {
+  return (rows: Row[], ctx: BuildCtx) => {
+    const groups = splitBy ? [...groupBy(rows, splitBy).values()] : [rows];
+    for (const g of groups) {
+      const tmp: AnyRecord[] = [];
+      BUILDERS[base](g, { ...ctx, out: tmp });
+      const byRow = new Map(g.map((r) => [r.row, r]));
+      for (const rec of tmp) {
+        const first = byRow.get(rec.source.rows[0])!;
+        const data = { ...(rec.data as unknown as Record<string, unknown>), ...extra(first, ctx, section) };
+        ctx.out.push({ ...rec, section, key: keyOf(data), data } as unknown as AnyRecord);
+      }
+    }
+  };
+}
+
+const origInvoice = (r: Row, ctx: BuildCtx, section: Section) => ({ oinum: str(r.v.oinum), oidt: dateField(r, 'oidt', ctx, section) });
+const origNote = (r: Row, ctx: BuildCtx, section: Section) => ({ ontNum: str(r.v.ontNum), ontDt: dateField(r, 'ontDt', ctx, section) });
+const origMonth = (r: Row, ctx: BuildCtx, section: Section) => {
+  const omon = originalMonth(r.v.fy, r.v.omonth);
+  if (!omon) ctx.issue('error', section, ctx.sheet, r.row, 'omon', `Original month not understood ("${str(r.v.omonth)}" in FY "${str(r.v.fy)}")`, { suggestion: 'Use the financial year like 2025-26 and a month name like JULY.' });
+  return { omon };
+};
+const monthOf = (r: Row) => `${str(r.v.fy)}|${str(r.v.omonth).toLowerCase()}`;
 
 function buildAdvance(section: 'at' | 'txpd', rows: Row[], ctx: BuildCtx) {
   for (const [k, g] of groupBy(rows, (r) => `${parsePos(r.v.pos)}|${parseNumber(r.v.diffPercent) ?? ''}`)) {

@@ -291,3 +291,45 @@ export async function searchGstinPublic(gstin: string): Promise<unknown> {
   const res = await request('POST', '/gst/compliance/public/gstin/search', { token: await platformToken(), body: { gstin } });
   return res.inner;
 }
+
+/* ---------- inward returns (GSTR-2A / GSTR-2B) for purchase reconciliation ---------- */
+
+/** GSTN codes meaning "nothing for this period" rather than a failure. */
+const NO_DATA = new Set(['RET13509', 'RET13510', 'RET2B1016']);
+
+/**
+ * GSTR-2A (all sections, one call) or GSTR-2B for a period, as GSTN's JSON – the same shape as the
+ * portal download, so the file reader handles both. Large GSTR-2B files come in parts (`fc`), which are
+ * fetched one by one and merged.
+ */
+export async function fetchInwardReturn(ctx: ClientContext, kind: 'gstr2a' | 'gstr2b', fp: string): Promise<unknown> {
+  const { year, month } = splitPeriod(fp);
+  return withSession(ctx, async (token) => {
+    try {
+      if (kind === 'gstr2a') {
+        const { inner } = await request('GET', `/gst/compliance/tax-payer/gstrs/gstr-2a/${year}/${month}`, { token });
+        const doc = (inner ?? {}) as Record<string, unknown>;
+        if (doc.token && !doc.b2b && !doc.cdn) {
+          throw new GstnError('GSTN is preparing a large GSTR-2A file for this period. Try again in a few minutes, or download the Excel/JSON from the GST portal and upload it here.');
+        }
+        return doc;
+      }
+      const path = `/gst/compliance/tax-payer/gstrs/gstr-2b/${year}/${month}`;
+      const first = (await request('GET', path, { token })).inner as { data?: { fc?: number; docdata?: Record<string, unknown[]> } } | undefined;
+      const fc = Number(first?.data?.fc ?? 0);
+      if (!first || fc <= 1) return first ?? {};
+      const docdata: Record<string, unknown[]> = {};
+      for (let i = 1; i <= fc; i++) {
+        const part = (await request('GET', path, { token, query: { file_number: String(i) } })).inner as { data?: { docdata?: Record<string, unknown[]> } } | undefined;
+        for (const [k, v] of Object.entries(part?.data?.docdata ?? {})) if (Array.isArray(v)) (docdata[k] ??= []).push(...v);
+      }
+      return { ...first, data: { ...first.data, docdata } };
+    } catch (e) {
+      if (e instanceof GstnError && !(e instanceof GstnSessionError) && e.code && NO_DATA.has(e.code)) return {};
+      if (e instanceof GstnError && e.code === 'RET2B1023') {
+        throw new GstnError('GSTR-2B for this period is not generated yet (GSTN generates it on the 14th of the following month).', e.code, e.httpStatus, e.transactionId);
+      }
+      throw e;
+    }
+  });
+}

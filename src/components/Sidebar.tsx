@@ -10,6 +10,7 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
   const links = [
     { href: '/', label: 'Returns' },
     { href: '/companies', label: 'Companies' },
+    { href: '/recon', label: 'Reconciliation' },
     { href: '/tools', label: 'Validators' },
     ...(canManageTeam ? [{ href: '/team', label: 'Team' }] : []),
     { href: '/license', label: 'License' },

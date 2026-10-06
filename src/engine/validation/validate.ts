@@ -116,7 +116,39 @@ function diffCheck(add: Add, d: number | null | undefined) {
 type Rule<S extends Section> = (r: Gstr1Record<S>, add: Add, ctx: ReturnContext) => void;
 const ss = (ctx: ReturnContext) => ctx.supplierGstin.slice(0, 2);
 
-const RULES: { [S in Section]: Rule<S> } = {
+/* ---------- amendments (Tables 9A, 9C, 10, 11) ---------- */
+
+/** Revised documents usually keep their original (earlier) date, so "before the period" is expected, not a warning. */
+const amendAdd = (add: Add): Add => (field, message, opts) => {
+  if (opts?.severity === 'warning' && /before the return period/.test(message)) return;
+  add(field, message, opts);
+};
+
+function originalDoc(add: Add, noField: string, no: string, dateField: string, date: string, ctx: ReturnContext, label: string) {
+  docNumber(add, noField, no, `Original ${label} number`);
+  if (!date) return add(dateField, `Original ${label} date is mandatory`);
+  if (!isIsoDate(date)) return add(dateField, `Original ${label} date is not a valid date`, { value: date });
+  const { start } = periodBounds(ctx.fp, ctx.quarterly);
+  if (date >= start) add(dateField, `Original ${label} date ${date} is in this return period – only documents reported in an earlier return can be amended`, { value: date, suggestion: 'Edit the document in its own table instead of amending it.' });
+}
+
+function originalMonth(add: Add, omon: string, ctx: ReturnContext) {
+  if (!omon) return add('omon', 'Original month (MMYYYY) is mandatory');
+  if (!/^(0[1-9]|1[0-2])\d{4}$/.test(omon)) return add('omon', 'Original month must be MMYYYY, e.g. 042025', { value: omon });
+  const key = (fp: string) => Number(fp.slice(2)) * 100 + Number(fp.slice(0, 2));
+  if (key(omon) >= key(ctx.fp)) add('omon', `Original month ${omon} must be before this return period ${ctx.fp}`, { value: omon });
+}
+
+function amendment<S extends Section, B extends Section>(base: Rule<B>, extra: (r: Gstr1Record<S>, add: Add, ctx: ReturnContext) => void): Rule<S> {
+  return (r, add, ctx) => {
+    base(r as unknown as Gstr1Record<B>, amendAdd(add), ctx);
+    extra(r, add, ctx);
+  };
+}
+
+type AmendSection = 'b2ba' | 'b2cla' | 'expa' | 'cdnra' | 'cdnura' | 'b2csa' | 'ata' | 'txpda';
+
+const BASE_RULES: { [S in Exclude<Section, AmendSection>]: Rule<S> } = {
   b2b(r, add, ctx) {
     const d = r.data;
     gstinField(add, 'ctin', d.ctin, ctx, 'Recipient GSTIN');
@@ -280,6 +312,18 @@ function hsnRule(r: Gstr1Record<'hsn_b2b' | 'hsn_b2c'>, add: Add, ctx: ReturnCon
   }
 }
 
+const RULES: { [S in Section]: Rule<S> } = {
+  ...BASE_RULES,
+  b2ba: amendment<'b2ba', 'b2b'>(BASE_RULES.b2b, (r, add, ctx) => originalDoc(add, 'oinum', r.data.oinum, 'oidt', r.data.oidt, ctx, 'invoice')),
+  b2cla: amendment<'b2cla', 'b2cl'>(BASE_RULES.b2cl, (r, add, ctx) => originalDoc(add, 'oinum', r.data.oinum, 'oidt', r.data.oidt, ctx, 'invoice')),
+  expa: amendment<'expa', 'exp'>(BASE_RULES.exp, (r, add, ctx) => originalDoc(add, 'oinum', r.data.oinum, 'oidt', r.data.oidt, ctx, 'invoice')),
+  cdnra: amendment<'cdnra', 'cdnr'>(BASE_RULES.cdnr, (r, add, ctx) => originalDoc(add, 'ontNum', r.data.ontNum, 'ontDt', r.data.ontDt, ctx, 'note')),
+  cdnura: amendment<'cdnura', 'cdnur'>(BASE_RULES.cdnur, (r, add, ctx) => originalDoc(add, 'ontNum', r.data.ontNum, 'ontDt', r.data.ontDt, ctx, 'note')),
+  b2csa: amendment<'b2csa', 'b2cs'>(BASE_RULES.b2cs, (r, add, ctx) => originalMonth(add, r.data.omon, ctx)),
+  ata: amendment<'ata', 'at'>(BASE_RULES.at, (r, add, ctx) => originalMonth(add, r.data.omon, ctx)),
+  txpda: amendment<'txpda', 'txpd'>(BASE_RULES.txpd, (r, add, ctx) => originalMonth(add, r.data.omon, ctx)),
+};
+
 /* ---------- cross-record checks ---------- */
 
 /** "row 12" for Excel rows, otherwise where the record came from (manual entry, marketplace report). */
@@ -301,6 +345,9 @@ function crossChecks(records: AnyRecord[], ctx: ReturnContext, out: ValidationIs
   for (const r of records) {
     if (r.section === 'b2b' || r.section === 'b2cl' || r.section === 'exp') dup(r, r.data.inum, 'inum', 'invoice');
     if (r.section === 'cdnr' || r.section === 'cdnur') dup(r, r.data.ntNum, 'ntNum', 'note');
+    // An earlier document can be amended only once per return.
+    if (r.section === 'b2ba' || r.section === 'b2cla' || r.section === 'expa') dup(r, r.data.oinum, 'oinum', 'amended original invoice');
+    if (r.section === 'cdnra' || r.section === 'cdnura') dup(r, r.data.ontNum, 'ontNum', 'amended original note');
     if (r.section === 'nil' || r.section === 'hsn_b2b' || r.section === 'hsn_b2c') {
       // Lines from different sources (Excel, manual, each marketplace) are summed by the JSON generator;
       // a repeat inside one source is a data-entry mistake.

@@ -11,26 +11,34 @@ export function recomputeRecordTax(rec: AnyRecord, supplierGstin: string): AnyRe
   const r = structuredClone(rec);
   switch (r.section) {
     case 'b2b':
-    case 'cdnr': {
+    case 'cdnr':
+    case 'b2ba':
+    case 'cdnra': {
       const d = r.data;
       const o = { pos: d.pos, diffPercent: d.diffPercent, forceIgst: ['SEWP', 'SEWOP', 'CBW'].includes(d.invTyp), noTax: d.invTyp === 'SEWOP' };
       d.items = d.items.map((it) => apply(it, it.txval, o));
       break;
     }
     case 'b2cl':
+    case 'b2cla':
       r.data.items = r.data.items.map((it) => apply(it, it.txval, { pos: r.data.pos, diffPercent: r.data.diffPercent, forceIgst: true }));
       break;
     case 'cdnur':
+    case 'cdnura':
       r.data.items = r.data.items.map((it) => apply(it, it.txval, { pos: r.data.pos || '96', diffPercent: r.data.diffPercent, forceIgst: true, noTax: r.data.urType === 'EXPWOP' }));
       break;
     case 'exp':
+    case 'expa':
       r.data.items = r.data.items.map((it) => apply(it, it.txval, { pos: '96', forceIgst: true, noTax: r.data.expTyp === 'WOPAY' }));
       break;
     case 'b2cs':
+    case 'b2csa':
       Object.assign(r.data, apply(r.data, r.data.txval, { pos: r.data.pos, diffPercent: r.data.diffPercent }));
       break;
     case 'at':
     case 'txpd':
+    case 'ata':
+    case 'txpda':
       r.data.items = r.data.items.map((it) =>
         it.rt == null || it.adAmt == null ? it : { ...it, ...computeTax(it.rt, it.adAmt, { pos: r.data.pos, supplierState: st, diffPercent: r.data.diffPercent }) },
       );
@@ -49,6 +57,12 @@ export function naturalKey(rec: AnyRecord): string | null {
     case 'b2cl': return `b2cl|${String(rec.data.inum ?? "").toUpperCase()}`;
     case 'exp': return `exp|${String(rec.data.inum ?? "").toUpperCase()}`;
     case 'cdnur': return `cdnur|${String(rec.data.ntNum ?? "").toUpperCase()}`;
+    // Amendments are identified by the original document they amend.
+    case 'b2ba': return `b2ba|${String(rec.data.ctin ?? '').toUpperCase()}|${String(rec.data.oinum ?? '').toUpperCase()}`;
+    case 'b2cla': return `b2cla|${String(rec.data.oinum ?? '').toUpperCase()}`;
+    case 'expa': return `expa|${String(rec.data.oinum ?? '').toUpperCase()}`;
+    case 'cdnra': return `cdnra|${String(rec.data.ctin ?? '').toUpperCase()}|${String(rec.data.ontNum ?? '').toUpperCase()}`;
+    case 'cdnura': return `cdnura|${String(rec.data.ontNum ?? '').toUpperCase()}`;
     default: return null;
   }
 }

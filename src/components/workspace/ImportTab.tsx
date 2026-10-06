@@ -49,7 +49,7 @@ export function ImportTab({ d, onDone }: { d: ReturnDetail; onDone: () => void }
             </div>
             {err && <div className="mt-4"><Notice tone="error">{err.msg}{Array.isArray(err.details) && <ul className="mt-2 list-disc pl-5">{(err.details as { sheet: string; reason: string }[]).map((s) => <li key={s.sheet}>{s.sheet}: {s.reason}</li>)}</ul>}</Notice></div>}
             <p className="mt-4 text-ink-soft">
-              Sheets read: b2b,sez,de · b2cl · b2cs · cdnr · cdnur · exp · at · atadj · exemp · hsn(b2b) · hsn(b2c) · docs.
+              Sheets read: b2b,sez,de · b2cl · b2cs · cdnr · cdnur · exp · at · atadj · exemp · hsn(b2b) · hsn(b2c) · docs, and the amendment sheets b2ba · b2cla · b2csa · cdnra · cdnura · expa · ata · atadja.
               Column order doesn’t matter; the header row is detected automatically. Taxes are computed from rate × taxable value unless your file has tax-amount columns.
             </p>
           </>

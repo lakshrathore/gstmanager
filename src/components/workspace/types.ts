@@ -22,5 +22,7 @@ export interface Issue {
 export const SECTION_LABELS: Record<string, string> = {
   b2b: 'B2B / SEZ / Deemed', b2cl: 'B2C Large', b2cs: 'B2C Others', cdnr: 'CDN Registered', cdnur: 'CDN Unregistered',
   exp: 'Exports', at: 'Advances received', txpd: 'Advances adjusted', nil: 'Nil / Exempt', hsn_b2b: 'HSN B2B', hsn_b2c: 'HSN B2C', docs: 'Documents',
+  b2ba: 'B2B amended (9A)', b2cla: 'B2C Large amended (9A)', expa: 'Exports amended (9A)', cdnra: 'CDN Registered amended (9C)',
+  cdnura: 'CDN Unregistered amended (9C)', b2csa: 'B2C Others amended (10)', ata: 'Advances received amended (11A)', txpda: 'Advances adjusted amended (11B)',
 };
 export const fmtValue = (v: unknown) => (v == null || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));

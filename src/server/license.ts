@@ -15,6 +15,7 @@ export const FEATURES: Record<FeatureKey, string> = {
   gstApi: 'File returns through the GST API integration',
   marketplaceImport: 'Import Amazon / Flipkart / Meesho sales reports',
   manualEntry: 'Add and edit return entries manually',
+  reconciliation: 'Purchase reconciliation with GSTR-2A / GSTR-2B',
 };
 
 export const LIMITS = {

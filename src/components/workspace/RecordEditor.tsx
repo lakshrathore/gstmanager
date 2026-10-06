@@ -10,7 +10,7 @@ import { fmtValue, SECTION_LABELS, type Issue } from './types';
 import type { Rec } from './RecordsTab';
 
 const NUMERIC = new Set(['val', 'rt', 'txval', 'iamt', 'camt', 'samt', 'csamt', 'adAmt', 'qty', 'totnum', 'cancel', 'nilAmt', 'exptAmt', 'ngsupAmt', 'diffPercent']);
-const DATES = new Set(['idt', 'ntDt', 'sbDt']);
+const DATES = new Set(['idt', 'ntDt', 'sbDt', 'oidt', 'ontDt']);
 const LABELS: Record<string, string> = {
   ctin: 'Recipient GSTIN', receiverName: 'Receiver name', inum: 'Invoice number', idt: 'Invoice date', val: 'Invoice value', pos: 'Place of supply (code)',
   rchrg: 'Reverse charge (Y/N)', invTyp: 'Invoice type (R/SEWP/SEWOP/DE/CBW)', etin: 'E-commerce GSTIN', diffPercent: 'Applicable % (65 or blank)',
@@ -18,6 +18,8 @@ const LABELS: Record<string, string> = {
   portCode: 'Port code', sbNum: 'Shipping bill no.', sbDt: 'Shipping bill date', typ: 'Type (OE/E)', splyTy: 'Supply type', nilAmt: 'Nil rated', exptAmt: 'Exempted',
   ngsupAmt: 'Non-GST', hsn: 'HSN/SAC', desc: 'Description', uqc: 'UQC', qty: 'Quantity', rt: 'Rate %', txval: 'Taxable value', iamt: 'IGST', camt: 'CGST',
   samt: 'SGST/UTGST', csamt: 'Cess', docTyp: 'Nature of document', from: 'Sr. no. from', to: 'Sr. no. to', totnum: 'Total number', cancel: 'Cancelled', adAmt: 'Advance amount',
+  oinum: 'Original invoice number', oidt: 'Original invoice date', ontNum: 'Original note number', ontDt: 'Original note date',
+  omon: 'Original month (MMYYYY, e.g. 042025)',
 };
 const ITEM_COLS = ['rt', 'txval', 'adAmt', 'iamt', 'camt', 'samt', 'csamt'];
 

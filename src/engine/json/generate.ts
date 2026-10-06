@@ -160,6 +160,95 @@ export function generateGstr1Json(records: AnyRecord[], ctx: ReturnContext): { j
     tally(s, rs.length, rs.flatMap((r) => r.data.items));
   }
 
+  /* ---------- amendments (9A, 9C, 10, 11) ---------- */
+  const b2ba = of(records, 'b2ba');
+  if (b2ba.length) {
+    out.b2ba = [...bucket(b2ba, (r) => r.data.ctin)].map(([ctin, rs]) => ({
+      ctin,
+      inv: rs.map(({ data: d }) => {
+        const inter = ['SEWP', 'SEWOP', 'CBW'].includes(d.invTyp) || d.pos !== st;
+        return {
+          oinum: d.oinum, oidt: toPortalDate(d.oidt), inum: d.inum, idt: toPortalDate(d.idt), val: n(d.val), pos: d.pos, rchrg: d.rchrg,
+          ...(d.etin ? { etin: d.etin } : {}), inv_typ: d.invTyp, ...diff(d.diffPercent), itms: itms(d.items, inter),
+        };
+      }),
+    }));
+    tally('b2ba', b2ba.length, b2ba.flatMap((r) => r.data.items));
+  }
+  const b2cla = of(records, 'b2cla');
+  if (b2cla.length) {
+    out.b2cla = [...bucket(b2cla, (r) => r.data.pos)].map(([pos, rs]) => ({
+      pos,
+      inv: rs.map(({ data: d }) => ({
+        oinum: d.oinum, oidt: toPortalDate(d.oidt), inum: d.inum, idt: toPortalDate(d.idt), val: n(d.val),
+        ...(d.etin ? { etin: d.etin } : {}), ...diff(d.diffPercent), itms: itms(d.items, true),
+      })),
+    }));
+    tally('b2cla', b2cla.length, b2cla.flatMap((r) => r.data.items));
+  }
+  const expa = of(records, 'expa');
+  if (expa.length) {
+    out.expa = [...bucket(expa, (r) => r.data.expTyp)].map(([exp_typ, rs]) => ({
+      exp_typ,
+      inv: rs.map(({ data: d }) => ({
+        oinum: d.oinum, oidt: toPortalDate(d.oidt), inum: d.inum, idt: toPortalDate(d.idt), val: n(d.val),
+        ...(d.portCode ? { sbpcode: d.portCode } : {}), ...(d.sbNum ? { sbnum: d.sbNum } : {}), ...(d.sbDt ? { sbdt: toPortalDate(d.sbDt) } : {}),
+        itms: d.items.map((it) => ({ txval: n(it.txval), rt: it.rt ?? 0, iamt: n(it.iamt), csamt: n(it.csamt) })),
+      })),
+    }));
+    tally('expa', expa.length, expa.flatMap((r) => r.data.items));
+  }
+  const cdnra = of(records, 'cdnra');
+  if (cdnra.length) {
+    out.cdnra = [...bucket(cdnra, (r) => r.data.ctin)].map(([ctin, rs]) => ({
+      ctin,
+      nt: rs.map(({ data: d }) => {
+        const inter = ['SEWP', 'SEWOP', 'CBW'].includes(d.invTyp) || d.pos !== st;
+        return {
+          ont_num: d.ontNum, ont_dt: toPortalDate(d.ontDt), ntty: d.ntty, nt_num: d.ntNum, nt_dt: toPortalDate(d.ntDt), val: n(d.val),
+          pos: d.pos, rchrg: d.rchrg, inv_typ: d.invTyp, ...diff(d.diffPercent), itms: itms(d.items, inter),
+        };
+      }),
+    }));
+    tally('cdnra', cdnra.length, cdnra.flatMap((r) => r.data.items));
+  }
+  const cdnura = of(records, 'cdnura');
+  if (cdnura.length) {
+    out.cdnura = cdnura.map(({ data: d }) => ({
+      typ: d.urType, ont_num: d.ontNum, ont_dt: toPortalDate(d.ontDt), ntty: d.ntty, nt_num: d.ntNum, nt_dt: toPortalDate(d.ntDt), val: n(d.val),
+      ...(d.urType === 'B2CL' && d.pos ? { pos: d.pos } : {}), ...(d.urType === 'B2CL' ? diff(d.diffPercent) : {}), itms: itms(d.items, true),
+    }));
+    tally('cdnura', cdnura.length, cdnura.flatMap((r) => r.data.items));
+  }
+  const b2csa = of(records, 'b2csa');
+  if (b2csa.length) {
+    // One object per original month + POS + type (+ ECO GSTIN), holding every rate.
+    out.b2csa = [...bucket(b2csa, (r) => `${r.data.omon}|${r.data.pos}|${r.data.typ}|${r.data.etin ?? ''}|${r.data.diffPercent ?? ''}`).values()].map((rs) => {
+      const d = rs[0].data;
+      const inter = d.pos !== st;
+      const byRate = [...bucket(rs, (r) => String(r.data.rt)).values()].map((g) => g.reduce((a, { data: x }) => ({
+        rt: x.rt ?? 0, txval: a.txval + (x.txval ?? 0), iamt: a.iamt + (x.iamt ?? 0), camt: a.camt + (x.camt ?? 0), samt: a.samt + (x.samt ?? 0), csamt: a.csamt + (x.csamt ?? 0),
+      }), { rt: 0, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }));
+      return {
+        omon: d.omon, pos: d.pos, sply_ty: sply(st, d.pos), typ: d.typ, ...(d.etin ? { etin: d.etin } : {}), ...diff(d.diffPercent),
+        itms: byRate.map((it) => ({ rt: it.rt, txval: n(it.txval), ...taxHeads(it, inter) })),
+      };
+    });
+    tally('b2csa', b2csa.length, b2csa.map((r) => r.data));
+  }
+  for (const s of ['ata', 'txpda'] as const) {
+    const rs = of(records, s);
+    if (!rs.length) continue;
+    out[s] = rs.map(({ data: d }) => {
+      const inter = d.pos !== st;
+      return {
+        omon: d.omon, pos: d.pos, sply_ty: sply(st, d.pos), ...diff(d.diffPercent),
+        itms: d.items.map((it: AdvanceItem) => ({ rt: it.rt ?? 0, ad_amt: n(it.adAmt), ...taxHeads(it, inter) })),
+      };
+    });
+    tally(s, rs.length, rs.flatMap((r) => r.data.items));
+  }
+
   const nil = of(records, 'nil');
   if (nil.length) {
     out.nil = {

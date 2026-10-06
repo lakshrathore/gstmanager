@@ -248,6 +248,83 @@ const GstProfileSchema = new Schema(
 );
 GstProfileSchema.index({ orgId: 1, companyId: 1 }, { unique: true });
 
+/* Purchases & ITC reconciliation (books ↔ GSTR-2A / GSTR-2B) */
+
+export const PURCHASE_SOURCES = ['books', 'gstr2a', 'gstr2b'] as const;
+
+/** One purchase document (invoice / credit note / debit note) from the books or the portal, per company and period. */
+const PurchaseDocSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    /** Period the data was uploaded for (MMYYYY). */
+    fp: { type: String, required: true },
+    source: { type: String, enum: PURCHASE_SOURCES, required: true },
+    key: { type: String, required: true },
+    docType: { type: String, enum: ['INV', 'CN', 'DN'], required: true },
+    supplierGstin: { type: String, required: true },
+    supplierName: String,
+    docNo: { type: String, required: true },
+    docDate: String,
+    pos: String,
+    rcm: Boolean,
+    taxable: Number, igst: Number, cgst: Number, sgst: Number, cess: Number,
+    invoiceValue: Number,
+    itcAvailable: Boolean,
+    itcReason: String,
+    /** Period the document belongs to in the source data (2B/2A return period, or the books period). */
+    period: String,
+    supplierPeriod: String,
+    supplierFilingDate: String,
+    supplierFiled: Boolean,
+    gstinCancelledOn: String,
+    amended: Boolean,
+    originalDocNo: String,
+    origin: { _id: false, file: String, row: Number, sheet: String },
+    importId: ObjectId,
+  },
+  { ...ts, minimize: false },
+);
+PurchaseDocSchema.index({ orgId: 1, companyId: 1, source: 1, fp: 1 });
+
+/** An upload (or portal download) of one source for one company + period. */
+const PurchaseImportSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    fp: { type: String, required: true },
+    source: { type: String, enum: PURCHASE_SOURCES, required: true },
+    via: { type: String, enum: ['file', 'portal'], default: 'file' },
+    files: [String],
+    docs: Number,
+    taxable: Number,
+    tax: Number,
+    notes: Mixed,
+    importedBy: String,
+  },
+  ts,
+);
+PurchaseImportSchema.index({ orgId: 1, companyId: 1, fp: 1, source: 1 }, { unique: true });
+
+/** A user decision in a reconciliation (ignore a document, link two documents, accept differences). */
+const ReconDecisionSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    fp: { type: String, required: true },
+    /** Which reconciliation: books vs GSTR-2A or vs GSTR-2B. */
+    against: { type: String, enum: ['gstr2a', 'gstr2b'], required: true },
+    action: { type: String, enum: ['ignore', 'link', 'accept'], required: true },
+    booksKey: String,
+    portalKey: String,
+    reason: String,
+    by: ObjectId,
+    byEmail: String,
+  },
+  ts,
+);
+ReconDecisionSchema.index({ orgId: 1, companyId: 1, fp: 1, against: 1 });
+
 /* Platform: super admin, packages and licenses (not scoped to an org) */
 
 /** Software owner. Separate from org users; signs in at /admin. */
@@ -262,7 +339,7 @@ const SuperAdminSchema = new Schema(
   ts,
 );
 
-export const FEATURE_KEYS = ['validators', 'gstApi', 'marketplaceImport', 'manualEntry'] as const;
+export const FEATURE_KEYS = ['validators', 'gstApi', 'marketplaceImport', 'manualEntry', 'reconciliation'] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
 /** A sellable plan. 0 in a limit means unlimited. */
@@ -399,6 +476,9 @@ export const PortalEvidence = model('PortalEvidence', PortalEvidenceSchema);
 export const GstApiSession = model('GstApiSession', GstApiSessionSchema);
 export const GstSession = model('GstSession', GstSessionSchema);
 export const GstProfile = model('GstProfile', GstProfileSchema);
+export const PurchaseDoc = model('PurchaseDoc', PurchaseDocSchema);
+export const PurchaseImport = model('PurchaseImport', PurchaseImportSchema);
+export const ReconDecision = model('ReconDecision', ReconDecisionSchema);
 export const SuperAdmin = model('SuperAdmin', SuperAdminSchema);
 export const Package = model('Package', PackageSchema);
 export const License = model('License', LicenseSchema);

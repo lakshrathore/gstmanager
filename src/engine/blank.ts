@@ -19,6 +19,14 @@ export function blankRecordData<S extends Section>(section: S, supplierState = '
     hsn_b2b: { hsn: '', desc: '', uqc: 'NOS', qty: 0, rt: null, txval: null, iamt: 0, camt: 0, samt: 0, csamt: 0 },
     hsn_b2c: { hsn: '', desc: '', uqc: 'NOS', qty: 0, rt: null, txval: null, iamt: 0, camt: 0, samt: 0, csamt: 0 },
     docs: { docTyp: 'Invoices for outward supply', from: '', to: '', totnum: null, cancel: 0 },
+    b2ba: { ctin: '', receiverName: '', oinum: '', oidt: '', inum: '', idt: '', val: null, pos: '', rchrg: 'N', invTyp: 'R', etin: '', diffPercent: null, items: [item()] },
+    b2cla: { oinum: '', oidt: '', inum: '', idt: '', val: null, pos: '', etin: '', diffPercent: null, items: [item()] },
+    expa: { expTyp: 'WPAY', oinum: '', oidt: '', inum: '', idt: '', val: null, portCode: '', sbNum: '', sbDt: '', items: [item()] },
+    cdnra: { ctin: '', receiverName: '', ontNum: '', ontDt: '', ntNum: '', ntDt: '', ntty: 'C', pos: '', rchrg: 'N', invTyp: 'R', val: null, diffPercent: null, items: [item()] },
+    cdnura: { urType: 'B2CL', ontNum: '', ontDt: '', ntNum: '', ntDt: '', ntty: 'C', pos: '', val: null, diffPercent: null, items: [item()] },
+    b2csa: { omon: '', typ: 'OE', pos: supplierState, etin: '', diffPercent: null, ...item() },
+    ata: { omon: '', pos: supplierState, diffPercent: null, items: [{ rt: null, adAmt: null, iamt: null, camt: null, samt: null, csamt: 0 }] },
+    txpda: { omon: '', pos: supplierState, diffPercent: null, items: [{ rt: null, adAmt: null, iamt: null, camt: null, samt: null, csamt: 0 }] },
   };
   return structuredClone(blanks[section]);
 }

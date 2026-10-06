@@ -225,21 +225,31 @@ export default function ReconPage() {
 function SourceCard({ s, imp, companyId, fp, onChange, setErr }: { s: (typeof SOURCES)[number]; imp?: Imp; companyId: string; fp: string; onChange: () => void; setErr: (e: string | null) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  /** Result of this card's last action, shown on the card itself so it is not missed. */
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'error' | 'warn'; text: string } | null>(null);
   async function upload(files: FileList | null) {
     if (!files?.length) return;
     if (imp && !confirm(`Replace the ${imp.docs} document(s) already uploaded for this period?`)) { if (input.current) input.current.value = ''; return; }
     const fd = new FormData();
     fd.append('companyId', companyId); fd.append('fp', fp); fd.append('source', s.id);
     for (const f of files) fd.append('files', f);
-    setBusy(true); setErr(null);
-    try { await call('/api/recon/upload', { method: 'POST', body: fd }); onChange(); }
-    catch (x) { const e = x as Error & { details?: { sheet: string; reason: string }[] }; setErr(`${s.title}: ${e.message}${e.details?.length ? ' – ' + e.details.slice(0, 3).map((d) => d.reason).join('; ') : ''}`); }
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const r = await call<{ import: { docs: number } }>('/api/recon/upload', { method: 'POST', body: fd });
+      setMsg({ tone: 'ok', text: `Read ${r.import.docs} document(s).` });
+      onChange();
+    } catch (x) { const e = x as Error & { details?: { sheet: string; reason: string }[] }; setMsg({ tone: 'error', text: `${e.message}${e.details?.length ? ' – ' + e.details.slice(0, 3).map((d) => d.reason).join('; ') : ''}` }); }
     finally { setBusy(false); if (input.current) input.current.value = ''; }
   }
   async function fetchPortal() {
-    setBusy(true); setErr(null);
-    try { await call('/api/recon/fetch', { method: 'POST', json: { companyId, fp, source: s.id } }); onChange(); }
-    catch (x) { setErr(`${s.title}: ${(x as Error).message}`); } finally { setBusy(false); }
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      const r = await call<{ import: { docs: number }; notes: string[] }>('/api/recon/fetch', { method: 'POST', json: { companyId, fp, source: s.id } });
+      setMsg(r.import.docs
+        ? { tone: 'ok', text: `Fetched ${r.import.docs} document(s) from the GST portal.` }
+        : { tone: 'warn', text: r.notes.filter((n) => !/^File is for GSTIN/.test(n)).slice(0, 2).join(' ') || 'GSTN returned no documents for this period.' });
+      onChange();
+    } catch (x) { setMsg({ tone: 'error', text: (x as Error).message }); } finally { setBusy(false); }
   }
   async function remove() {
     if (!confirm(`Remove the uploaded ${s.title} for this period?`)) return;
@@ -259,6 +269,7 @@ function SourceCard({ s, imp, companyId, fp, onChange, setErr }: { s: (typeof SO
           {!!imp.notes?.length && <details className="mt-1"><summary className="cursor-pointer text-amber">{imp.notes.length} note(s)</summary><ul className="mt-1 space-y-0.5">{imp.notes.slice(0, 20).map((n, i) => <li key={i}>{n.message}</li>)}</ul></details>}
         </div>
       ) : <p className="mt-3 text-[12.5px] text-ink-soft">Not uploaded for this period.</p>}
+      {msg && <div className="mt-3 text-[12.5px]"><Notice tone={msg.tone}>{msg.text}</Notice></div>}
       <div className="mt-3 flex flex-wrap gap-2">
         <input ref={input} type="file" multiple accept={s.id === 'books' ? '.xlsx,.csv' : '.xlsx,.csv,.json'} className="hidden" onChange={(e) => upload(e.target.files)} />
         <Button variant="secondary" busy={busy} onClick={() => input.current?.click()}>{imp ? 'Replace' : 'Upload'}</Button>

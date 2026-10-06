@@ -1,5 +1,5 @@
 import { licenseState, usage } from '@/server/license';
-import { License, Organization, User } from '@/server/models';
+import { License, Organization, PaymentRequest, User } from '@/server/models';
 import { adminApi } from '@/server/superadmin';
 
 /** Every organisation with its owner, license and usage, plus platform totals. */
@@ -25,6 +25,7 @@ export const GET = adminApi(async () => {
       unlicensed: rows.filter((r) => r.license.status !== 'active').length,
       unusedKeys: await License.countDocuments({ status: 'unused' }),
       users: await User.countDocuments({ active: true }),
+      pendingPayments: await PaymentRequest.countDocuments({ status: 'pending' }),
     },
   };
 });

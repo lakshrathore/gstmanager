@@ -6,8 +6,10 @@ import { call } from '@/lib/client';
 
 const LINKS = [
   { href: '/admin', label: 'Customers' },
+  { href: '/admin/payments', label: 'Payments' },
   { href: '/admin/licenses', label: 'Licenses' },
   { href: '/admin/packages', label: 'Packages' },
+  { href: '/admin/settings', label: 'Settings' },
   { href: '/admin/account', label: 'My account' },
 ];
 

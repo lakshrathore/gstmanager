@@ -17,3 +17,5 @@ export { fixGstr1Json, markAutoFixable, FIX_LABELS, type AppliedFix, type FixCod
 export { checkHsn, HSN_CHAPTERS, SAC_HEADINGS, type HsnCheck, type HsnIssue } from './hsn';
 export { parsePortalErrorReport, type PortalError } from './portal/errorReport';
 export { recomputeRecordTax, naturalKey } from './tax';
+export { blankRecordData } from './blank';
+export * from './marketplace';

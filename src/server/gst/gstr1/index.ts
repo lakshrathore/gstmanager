@@ -1,8 +1,9 @@
 import 'server-only';
+import { Types } from 'mongoose';
 import {
-  financialYear, generateGstr1Json, naturalKey, parseGstr1Tables, periodBounds, profileForPeriod,
+  blankRecordData, financialYear, generateGstr1Json, SECTIONS, naturalKey, parseGstr1Tables, periodBounds, profileForPeriod,
   readWorkbook, recomputeRecordTax, validateGstr1Json, validateReturn,
-  type AnyRecord, type ReturnContext,
+  type AnyRecord, type ReturnContext, type Section,
 } from '@/engine';
 import { canAccessCompany, type Auth } from '../../auth';
 import { sha256 } from '../../crypto';
@@ -72,6 +73,9 @@ export async function createReturn(auth: Auth, companyId: string, fp: string) {
 
 /* ---------- import ---------- */
 
+/** Records not created by the Excel template import: manual entries ("manual") and marketplace reports ("mp:…"). */
+export const OTHER_SOURCES = /^(manual$|mp:)/;
+
 export async function importExcel(auth: Auth, returnId: string, file: File) {
   const { ret, company } = await loadReturn(auth, returnId);
   assertEditable(ret.status, 're-import');
@@ -84,7 +88,12 @@ export async function importExcel(auth: Auth, returnId: string, file: File) {
   if (!parsed.sheetsParsed.length) throw new HttpError(422, 'No GSTR-1 sheets recognised in this workbook', parsed.sheetsSkipped);
 
   const base = { orgId: ret.orgId, returnId: ret._id };
-  await Promise.all([Gstr1Record.deleteMany(base), Gstr1Error.deleteMany(base), GeneratedJson.deleteMany(base)]);
+  // Replaces only what came from the Excel template; manual entries and marketplace imports stay.
+  await Promise.all([
+    Gstr1Record.deleteMany({ ...base, 'source.sheet': { $not: OTHER_SOURCES } }),
+    Gstr1Error.deleteMany({ ...base, $or: [{ origin: { $ne: 'import' } }, { sheet: { $not: OTHER_SOURCES } }] }),
+    GeneratedJson.deleteMany(base),
+  ]);
   for (let i = 0; i < parsed.records.length; i += 1000) {
     await Gstr1Record.insertMany(parsed.records.slice(i, i + 1000).map((r) => ({ ...base, section: r.section, key: r.key, source: r.source, data: r.data })), { ordered: false });
   }
@@ -192,6 +201,25 @@ export async function updateRecord(auth: Auth, returnId: string, recordId: strin
   await auditReturn(auth, ret, 'record.update', { section: doc.section, key: doc.key, before: doc.data, after: rec.data }, 'Gstr1Record', String(doc._id));
   const v = await revalidate(auth, returnId, { silent: true });
   return { record: { ...doc, key, data: rec.data, edited: true }, summary: v.summary };
+}
+
+/** Adds a record typed in by the user (manual return entry, like the offline tool's forms). */
+export async function createRecord(auth: Auth, returnId: string, section: string, data: unknown, recomputeTax: boolean) {
+  const { ret, company } = await loadReturn(auth, returnId);
+  assertEditable(ret.status, 'adding entries');
+  if (!(SECTIONS as readonly string[]).includes(section)) throw new HttpError(400, 'Unknown section');
+  if (!data || typeof data !== 'object') throw new HttpError(400, 'data must be an object');
+  const blank = blankRecordData(section as Section, company.gstin.slice(0, 2)) as unknown as Record<string, unknown>;
+  const id = new Types.ObjectId();
+  let rec = toRecord({ section, key: '', source: { sheet: 'manual', rows: [] }, data: sanitize(blank, data as Record<string, unknown>) });
+  if (recomputeTax) rec = recomputeRecordTax(rec, company.gstin);
+  rec.key = naturalKey(rec) ?? `${section}|manual|${String(id)}`;
+  await Gstr1Record.create({ _id: id, orgId: ret.orgId, returnId: ret._id, section, key: rec.key, source: rec.source, data: rec.data, edited: true });
+  await GstReturn.updateOne({ _id: ret._id }, { $set: { jsonStale: !!ret.currentJsonId } });
+  if (normalizeStatus(ret.status) === 'draft') await changeStatus(auth, ret, 'imported', { note: 'Manual entry started' });
+  await auditReturn(auth, ret, 'record.create', { section, key: rec.key, data: rec.data }, 'Gstr1Record', String(id));
+  const v = await revalidate(auth, returnId, { silent: true });
+  return { record: { _id: String(id), section, key: rec.key, data: rec.data }, summary: v.summary };
 }
 
 export async function deleteRecord(auth: Auth, returnId: string, recordId: string) {

@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Button, Notice, Panel } from '@/components/ui';
 import { call } from '@/lib/client';
 import { DATA_LOCKED, STATUS_LABELS, type ReturnStatus } from '@/server/gst/gst-status/statuses';
+import { MarketplaceImport } from './MarketplaceImport';
 import { SECTION_LABELS, type ReturnDetail } from './types';
 
 export function ImportTab({ d, onDone }: { d: ReturnDetail; onDone: () => void }) {
@@ -17,7 +18,7 @@ export function ImportTab({ d, onDone }: { d: ReturnDetail; onDone: () => void }
 
   async function upload() {
     if (!file) return;
-    if (info && !confirm(`Replace all ${d.return.summary?.total ?? ''} records imported from ${info.fileName}? Edits made in the app will be lost.`)) return;
+    if (info && !confirm(`Replace the records imported from ${info.fileName}? Changes made to those records in the app will be lost. Manual entries and marketplace imports are kept.`)) return;
     setBusy(true); setErr(null);
     const fd = new FormData();
     fd.append('file', file);
@@ -27,6 +28,7 @@ export function ImportTab({ d, onDone }: { d: ReturnDetail; onDone: () => void }
   }
 
   return (
+    <div className="space-y-6">
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       <Panel title={info ? 'Re-import Excel' : 'Import GSTR-1 Excel'}>
         {locked ? <Notice tone="warn">This return is “{STATUS_LABELS[d.return.status as ReturnStatus]}”. Import is locked to protect the file that went to the GST portal.</Notice> : (
@@ -72,6 +74,9 @@ export function ImportTab({ d, onDone }: { d: ReturnDetail; onDone: () => void }
           </div>
         )}
       </Panel>
+    </div>
+    <MarketplaceImport d={d} locked={locked} onDone={onDone} />
+    <p className="text-ink-soft">No Excel file? Open the <b>Records</b> tab and use <b>Add entry</b> to type invoices, B2C totals, HSN lines and documents in by hand – like the GST offline tool.</p>
     </div>
   );
 }

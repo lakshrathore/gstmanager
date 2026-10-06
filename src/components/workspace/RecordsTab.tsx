@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Empty, Panel } from '@/components/ui';
 import { call, inr } from '@/lib/client';
+import type { Section } from '@/engine/types';
 import { RecordEditor } from './RecordEditor';
 import { SECTION_LABELS, type ReturnDetail } from './types';
 
@@ -31,6 +32,9 @@ export function RecordsTab({ d, focusKey, onFocusHandled, onChanged }: { d: Retu
   const [page, setPage] = useState(1);
   const [res, setRes] = useState<{ records: Rec[]; total: number; size: number } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [adding, setAdding] = useState<Section | null>(null);
+  const [addSection, setAddSection] = useState<Section>('b2b');
+  const locked = ['uploading', 'uploaded', 'processing', 'processed', 'filed'].includes(d.return.status);
 
   const load = useCallback(() => {
     const qs = new URLSearchParams(Object.entries({ section, status, q, page: String(page) }).filter(([, v]) => v)).toString();
@@ -50,13 +54,20 @@ export function RecordsTab({ d, focusKey, onFocusHandled, onChanged }: { d: Retu
   const pages = res ? Math.max(1, Math.ceil(res.total / res.size)) : 1;
   return (
     <>
-      <Panel title="Imported records">
+      <Panel title="Records" action={!locked && (
+        <div className="flex items-center gap-2">
+          <select aria-label="Section for the new entry" className="w-56" value={addSection} onChange={(e) => setAddSection(e.target.value as Section)}>
+            {Object.entries(SECTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <Button onClick={() => { setOpen(null); setAdding(addSection); }}>Add entry</Button>
+        </div>
+      )}>
         <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_1fr_2fr]">
           <label>Section<select value={section} onChange={(e) => { setSection(e.target.value); setPage(1); }}><option value="">All sections</option>{Object.entries(SECTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v} {d.return.summary?.bySection[k] ? `(${d.return.summary.bySection[k].total})` : ''}</option>)}</select></label>
           <label>Show<select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}><option value="">All records</option><option value="errors">With errors</option><option value="warnings">With warnings</option></select></label>
           <label>Search document number or GSTIN<input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="INV/001, 27AAAC…" /></label>
         </div>
-        {!res ? <p className="text-ink-soft">Loading…</p> : res.records.length === 0 ? <Empty title="No records match">Import an Excel file or clear the filters.</Empty> : (
+        {!res ? <p className="text-ink-soft">Loading…</p> : res.records.length === 0 ? <Empty title="No records match">Import a file, add entries manually with “Add entry”, or clear the filters.</Empty> : (
           <>
             <div className="-mx-5 overflow-x-auto">
               <table className="ledger">
@@ -93,6 +104,11 @@ export function RecordsTab({ d, focusKey, onFocusHandled, onChanged }: { d: Retu
           </>
         )}
       </Panel>
+      {adding && (
+        <RecordEditor returnId={d.return._id} recordId={null} create={{ section: adding, supplierState: d.company.gstin.slice(0, 2) }}
+          onClose={() => setAdding(null)} onSaved={() => { load(); onChanged(); }} onResolved={() => setAdding(null)}
+          onCreated={(id) => { setAdding(null); setOpen(id); }} />
+      )}
       {open && <RecordEditor returnId={d.return._id} recordId={open} onClose={() => setOpen(null)} onSaved={() => { load(); onChanged(); }}
         onResolved={() => { setOpen(null); if (q.includes('|')) { setQ(''); setPage(1); } /* a Fix link's record key */ }} />}
     </>

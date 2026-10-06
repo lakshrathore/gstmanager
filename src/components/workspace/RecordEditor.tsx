@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { Button, Notice, Severity } from '@/components/ui';
+import { blankRecordData } from '@/engine/blank';
+import { DOC_TYPES, STATE_CODES, UQC_CODES } from '@/engine/masters';
+import type { Section } from '@/engine/types';
 import { call } from '@/lib/client';
 import { fmtValue, SECTION_LABELS, type Issue } from './types';
 import type { Rec } from './RecordsTab';
@@ -20,17 +23,40 @@ const ITEM_COLS = ['rt', 'txval', 'adAmt', 'iamt', 'camt', 'samt', 'csamt'];
 
 const coerce = (k: string, v: string) => (NUMERIC.has(k) ? (v.trim() === '' ? null : Number(v)) : v);
 
-/** onResolved: the save left the record with no errors or warnings – the editor should close. */
-export function RecordEditor({ returnId, recordId, onClose, onSaved, onResolved }: { returnId: string; recordId: string; onClose: () => void; onSaved: () => void; onResolved: () => void }) {
-  const [rec, setRec] = useState<Rec | null>(null);
-  const [data, setData] = useState<Record<string, unknown>>({});
+const states = Object.entries(STATE_CODES).filter(([c]) => c !== '96').map(([c, n]) => [c, `${c} – ${n}`] as const);
+/** Fixed-choice fields get a dropdown (value, label). */
+const CHOICES: Record<string, readonly (readonly [string, string])[]> = {
+  pos: states,
+  rchrg: [['N', 'N – No'], ['Y', 'Y – Yes']],
+  invTyp: [['R', 'R – Regular'], ['SEWP', 'SEWP – SEZ with payment'], ['SEWOP', 'SEWOP – SEZ without payment'], ['DE', 'DE – Deemed export'], ['CBW', 'CBW – Intra-state supply attracting IGST']],
+  ntty: [['C', 'C – Credit note'], ['D', 'D – Debit note']],
+  typ: [['OE', 'OE – Own sales'], ['E', 'E – Through e-commerce operator']],
+  urType: [['B2CL', 'B2CL'], ['EXPWP', 'EXPWP – Export with payment'], ['EXPWOP', 'EXPWOP – Export without payment']],
+  expTyp: [['WPAY', 'WPAY – With payment of tax'], ['WOPAY', 'WOPAY – Without payment of tax']],
+  splyTy: [['INTRAB2C', 'Intra-state, unregistered'], ['INTRB2C', 'Inter-state, unregistered'], ['INTRAB2B', 'Intra-state, registered'], ['INTRB2B', 'Inter-state, registered']],
+  uqc: Object.entries(UQC_CODES).map(([c, n]) => [c, `${c} – ${n}`] as const),
+  docTyp: Object.keys(DOC_TYPES).map((t) => [t, t] as const),
+};
+
+/**
+ * Edit an existing record, or (with `create`) type a new one in – manual return entry.
+ * onResolved: the save left the record with no errors or warnings – the editor should close.
+ * onCreated: a new record was saved; the parent reopens the editor on it so its issues show.
+ */
+export function RecordEditor({ returnId, recordId, create, onClose, onSaved, onResolved, onCreated }: {
+  returnId: string; recordId: string | null; create?: { section: Section; supplierState: string };
+  onClose: () => void; onSaved: () => void; onResolved: () => void; onCreated?: (id: string) => void;
+}) {
+  const fresh = create ? ({ _id: '', section: create.section, key: '', data: blankRecordData(create.section, create.supplierState), hasErrors: false, hasWarnings: false, edited: true } as unknown as Rec) : null;
+  const [rec, setRec] = useState<Rec | null>(fresh);
+  const [data, setData] = useState<Record<string, unknown>>(fresh ? structuredClone(fresh.data) : {});
   const [issues, setIssues] = useState<Issue[]>([]);
   const [recompute, setRecompute] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const load = () => call<{ record: Rec; issues: Issue[] }>(`/api/returns/${returnId}/records/${recordId}`).then((r) => { setRec(r.record); setData(structuredClone(r.record.data)); setIssues(r.issues); return r.issues; });
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [recordId]);
+  useEffect(() => { if (recordId) load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [recordId]);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', esc);
@@ -44,6 +70,14 @@ export function RecordEditor({ returnId, recordId, onClose, onSaved, onResolved 
 
   async function save() {
     setBusy(true); setErr(null);
+    if (create) {
+      try {
+        const r = await call<{ record: { _id: string } }>(`/api/returns/${returnId}/records`, { method: 'POST', json: { section: create.section, data, recomputeTax: recompute } });
+        onSaved();
+        onCreated?.(r.record._id);
+      } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+      return;
+    }
     try {
       await call(`/api/returns/${returnId}/records/${recordId}`, { method: 'PATCH', json: { data, recomputeTax: recompute } });
       const left = await load();
@@ -64,7 +98,7 @@ export function RecordEditor({ returnId, recordId, onClose, onSaved, onResolved 
         <header className="sticky top-0 z-10 flex items-center justify-between border-b border-rule bg-white px-6 py-4">
           <div>
             <p className="text-ink-soft">{rec ? SECTION_LABELS[rec.section] : ''}</p>
-            <h2 className="num text-[17px] font-semibold">{String(data.inum ?? data.ntNum ?? data.hsn ?? data.pos ?? '')}</h2>
+            <h2 className="num text-[17px] font-semibold">{create ? 'New entry' : String(data.inum ?? data.ntNum ?? data.hsn ?? data.pos ?? '')}</h2>
           </div>
           <Button variant="ghost" onClick={onClose} aria-label="Close">Close</Button>
         </header>
@@ -85,14 +119,22 @@ export function RecordEditor({ returnId, recordId, onClose, onSaved, onResolved 
               {Object.keys(data).filter((k) => k !== 'items').map((k) => (
                 <label key={k}>
                   {LABELS[k] ?? k}
-                  <input
-                    className={`num ${hasIssue(k) ? 'border-red-ink bg-red-tint' : ''}`}
-                    type={DATES.has(k) && /^\d{4}-\d{2}-\d{2}$/.test(String(data[k] ?? '')) ? 'date' : NUMERIC.has(k) ? 'number' : 'text'}
-                    step="any"
-                    value={data[k] == null ? '' : String(data[k])}
-                    onChange={(e) => setData({ ...data, [k]: coerce(k, e.target.value) })}
-                    aria-invalid={hasIssue(k)}
-                  />
+                  {CHOICES[k] && (data[k] === '' || data[k] == null || CHOICES[k].some(([v]) => v === data[k])) ? (
+                    <select className={hasIssue(k) ? 'border-red-ink bg-red-tint' : ''} value={data[k] == null ? '' : String(data[k])}
+                      onChange={(e) => setData({ ...data, [k]: e.target.value })} aria-invalid={hasIssue(k)}>
+                      <option value="">— Select —</option>
+                      {CHOICES[k].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                    </select>
+                  ) : (
+                    <input
+                      className={`num ${hasIssue(k) ? 'border-red-ink bg-red-tint' : ''}`}
+                      type={DATES.has(k) && /^(\d{4}-\d{2}-\d{2})?$/.test(String(data[k] ?? '')) ? 'date' : NUMERIC.has(k) ? 'number' : 'text'}
+                      step="any"
+                      value={data[k] == null ? '' : String(data[k])}
+                      onChange={(e) => setData({ ...data, [k]: coerce(k, e.target.value) })}
+                      aria-invalid={hasIssue(k)}
+                    />
+                  )}
                   {fieldIssues(k).length > 0 && <span className="text-red-ink">{fieldIssues(k)[0].message}</span>}
                 </label>
               ))}
@@ -130,13 +172,15 @@ export function RecordEditor({ returnId, recordId, onClose, onSaved, onResolved 
             <label className="flex items-center gap-2 text-ink"><input type="checkbox" className="w-auto" checked={recompute} onChange={(e) => setRecompute(e.target.checked)} />Recalculate IGST/CGST/SGST from rate × taxable value</label>
             {err && <Notice tone="error">{err}</Notice>}
             <div className="flex flex-wrap justify-between gap-3 border-t border-rule pt-4">
-              <Button variant="danger" onClick={remove} disabled={busy}>Delete record</Button>
+              {create ? <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button> : <Button variant="danger" onClick={remove} disabled={busy}>Delete record</Button>}
               <div className="flex gap-2">
-                <Button variant="secondary" onClick={() => setData(structuredClone(rec.data))} disabled={busy}>Discard changes</Button>
-                <Button onClick={save} busy={busy}>Save and revalidate</Button>
+                <Button variant="secondary" onClick={() => setData(structuredClone(rec.data))} disabled={busy}>{create ? 'Clear' : 'Discard changes'}</Button>
+                <Button onClick={save} busy={busy}>{create ? 'Add entry and validate' : 'Save and revalidate'}</Button>
               </div>
             </div>
-            <p className="text-[12.5px] text-ink-soft">Raw Excel values: <span className="num">{fmtValue((rec as unknown as { source?: { raw?: unknown } }).source?.raw)}</span></p>
+            {!create && (rec as unknown as { source?: { raw?: unknown } }).source?.raw != null && (
+              <p className="text-[12.5px] text-ink-soft">Raw source values: <span className="num">{fmtValue((rec as unknown as { source?: { raw?: unknown } }).source?.raw)}</span></p>
+            )}
           </div>
         )}
       </div>

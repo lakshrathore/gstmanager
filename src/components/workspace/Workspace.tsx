@@ -34,7 +34,7 @@ function stages(d: ReturnDetail): { app: Stage[]; portal: Stage[] } {
   const portal = d.return.portal ?? {};
   return {
     app: [
-      { label: 'Import Excel', done: !!sum?.total, note: sum?.total ? `${sum.total.toLocaleString('en-IN')} records` : 'Not imported' },
+      { label: 'Add data', done: !!sum?.total, note: sum?.total ? `${sum.total.toLocaleString('en-IN')} records` : 'Import or enter manually' },
       { label: 'Validate & fix', done: !!sum?.total && !sum.errorCount, bad: !!sum?.errorCount, note: sum?.total ? (sum.errorCount ? `${sum.errorCount} errors` : 'No errors') : '—' },
       { label: 'Generate JSON', done: !!d.json && !d.return.jsonStale, bad: d.return.jsonStale, note: d.json ? (d.return.jsonStale ? 'Out of date' : `${(d.json.sizeBytes / 1024).toFixed(1)} KB`) : '—' },
       { label: 'Approve for upload', done: at('ready_for_upload') && s !== 'error', note: at('ready_for_upload') && s !== 'error' ? 'Approved' : '—' },

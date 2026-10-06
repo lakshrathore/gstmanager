@@ -104,14 +104,23 @@ export function generateGstr1Json(records: AnyRecord[], ctx: ReturnContext): { j
 
   const b2cs = of(records, 'b2cs');
   if (b2cs.length) {
-    out.b2cs = b2cs.map(({ data: d }) => {
+    // The same POS/rate/type/e-commerce GSTIN can come from several sources (Excel, manual entry,
+    // each marketplace report). The portal wants one row per combination, so they are summed here.
+    const merged = [...bucket(b2cs, (r) => `${r.data.pos}|${r.data.typ}|${r.data.etin ?? ''}|${r.data.rt}|${r.data.diffPercent ?? ''}`).values()].map((rs) => {
+      const d = rs.reduce((a, { data: x }) => ({
+        ...a, txval: (a.txval ?? 0) + (x.txval ?? 0), iamt: (a.iamt ?? 0) + (x.iamt ?? 0), camt: (a.camt ?? 0) + (x.camt ?? 0),
+        samt: (a.samt ?? 0) + (x.samt ?? 0), csamt: (a.csamt ?? 0) + (x.csamt ?? 0),
+      }), { ...rs[0].data, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 });
+      return d;
+    });
+    out.b2cs = merged.map((d) => {
       const inter = d.pos !== st;
       return {
         sply_ty: sply(st, d.pos), pos: d.pos, typ: d.typ, ...(d.etin ? { etin: d.etin } : {}), ...diff(d.diffPercent),
         rt: d.rt ?? 0, txval: n(d.txval), ...taxHeads(d, inter),
       };
     });
-    tally('b2cs', b2cs.length, b2cs.map((r) => r.data));
+    tally('b2cs', merged.length, merged);
   }
 
   const cdnr = of(records, 'cdnr');
@@ -164,7 +173,16 @@ export function generateGstr1Json(records: AnyRecord[], ctx: ReturnContext): { j
     qty: n(r.data.qty), rt: r.data.rt ?? 0, txval: n(r.data.txval), iamt: n(r.data.iamt), camt: n(r.data.camt),
     samt: n(r.data.samt), csamt: n(r.data.csamt),
   });
-  const hb2b = of(records, 'hsn_b2b'), hb2c = of(records, 'hsn_b2c');
+  /** One line per HSN + UQC + rate, summed across sources (see b2cs above). */
+  const mergeHsn = <S extends 'hsn_b2b' | 'hsn_b2c'>(rs: Gstr1Record<S>[]) =>
+    [...bucket(rs, (r) => `${r.data.hsn}|${r.data.uqc}|${r.data.rt}`).values()].map((g) => g.length === 1 ? g[0] : {
+      ...g[0],
+      data: g.slice(1).reduce((a, { data: x }) => ({
+        ...a, qty: (a.qty ?? 0) + (x.qty ?? 0), txval: (a.txval ?? 0) + (x.txval ?? 0), iamt: (a.iamt ?? 0) + (x.iamt ?? 0),
+        camt: (a.camt ?? 0) + (x.camt ?? 0), samt: (a.samt ?? 0) + (x.samt ?? 0), csamt: (a.csamt ?? 0) + (x.csamt ?? 0),
+      }), { ...g[0].data }),
+    });
+  const hb2b = mergeHsn(of(records, 'hsn_b2b')), hb2c = mergeHsn(of(records, 'hsn_b2c'));
   if (hb2b.length || hb2c.length) {
     out.hsn = ctx.profile.hsnSplit
       ? { ...(hb2b.length ? { hsn_b2b: hb2b.map(hsnRow) } : {}), ...(hb2c.length ? { hsn_b2c: hb2c.map(hsnRow) } : {}) }

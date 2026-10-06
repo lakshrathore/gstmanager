@@ -1,6 +1,7 @@
 import { api } from '@/server/http';
 import { Gstr1Record } from '@/server/models';
-import { loadReturn } from '@/server/gst/gstr1';
+import { createRecord, loadReturn } from '@/server/gst/gstr1';
+import { z } from 'zod';
 
 export const GET = api('return:view', async (req, { auth, params }) => {
   const { ret } = await loadReturn(auth, params.id);
@@ -19,3 +20,11 @@ export const GET = api('return:view', async (req, { auth, params }) => {
   ]);
   return { records, total, page, size };
 });
+
+const Body = z.object({ section: z.string().min(2).max(20), data: z.record(z.string(), z.unknown()), recomputeTax: z.boolean().default(true) });
+
+/** Manual entry: add one record (invoice, note, B2CS line, HSN line, documents …). */
+export const POST = api('return:edit', async (req, { auth, params }) => {
+  const b = Body.parse(await req.json());
+  return createRecord(auth, params.id, b.section, b.data, b.recomputeTax);
+}, { feature: 'manualEntry' });

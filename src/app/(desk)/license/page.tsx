@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { PayByUpi } from '@/components/PayByUpi';
 import { Button, fmtDate, LicenseBadge, Notice, Panel } from '@/components/ui';
 import { call } from '@/lib/client';
 
@@ -79,7 +80,8 @@ export default function LicensePage() {
           )}
         </Panel>
       )}
-      <Panel title={L?.status === 'active' ? 'Renew or upgrade' : 'Activate a license'}>
+      {info && <PayByUpi canPay={canManage} limitLabels={info.limitLabels} featureLabels={info.featureLabels} />}
+      <Panel title="Have a license key?">
         {canManage ? (
           <form onSubmit={activate} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
             <label>License key<input name="key" required minLength={10} maxLength={40} placeholder="GSTD-XXXXX-XXXXX-XXXXX-XXXXX" className="num uppercase" autoComplete="off" /></label>

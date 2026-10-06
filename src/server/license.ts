@@ -13,6 +13,8 @@ import { Company, GstReturn, License, Organization, Package, User, oid, type Fea
 export const FEATURES: Record<FeatureKey, string> = {
   validators: 'GSTIN / HSN / JSON validators',
   gstApi: 'File returns through the GST API integration',
+  marketplaceImport: 'Import Amazon / Flipkart / Meesho sales reports',
+  manualEntry: 'Add and edit return entries manually',
 };
 
 export const LIMITS = {

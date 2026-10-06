@@ -282,13 +282,17 @@ function hsnRule(r: Gstr1Record<'hsn_b2b' | 'hsn_b2c'>, add: Add, ctx: ReturnCon
 
 /* ---------- cross-record checks ---------- */
 
+/** "row 12" for Excel rows, otherwise where the record came from (manual entry, marketplace report). */
+const sourceGroup = (r: AnyRecord) => (r.source.sheet === 'manual' ? 'manual' : r.source.sheet?.startsWith('mp:') ? r.source.sheet.split(':').slice(0, 2).join(':') : 'excel');
+const where = (r: AnyRecord) => (r.source.rows?.length ? `row ${r.source.rows[0]}` : r.source.sheet === 'manual' ? 'a manual entry' : r.source.sheet || 'another record');
+
 function crossChecks(records: AnyRecord[], ctx: ReturnContext, out: ValidationIssue[]) {
   const seen = new Map<string, AnyRecord>();
   const dup = (rec: AnyRecord, no: string, field: string, label: string) => {
     const k = `${label}|${no.toUpperCase()}`;
     const first = seen.get(k);
     if (first) {
-      adder(rec, out, no)(field, `Duplicate ${label} number "${no}" (also in ${first.section}, row ${first.source.rows[0]})`, {
+      adder(rec, out, no)(field, `Duplicate ${label} number "${no}" (also in ${first.section}, ${where(first)})`, {
         value: no, code: 'DUPLICATE_DOCUMENT', suggestion: 'Each document number must be unique in a financial year.',
       });
     } else seen.set(k, rec);
@@ -298,9 +302,11 @@ function crossChecks(records: AnyRecord[], ctx: ReturnContext, out: ValidationIs
     if (r.section === 'b2b' || r.section === 'b2cl' || r.section === 'exp') dup(r, r.data.inum, 'inum', 'invoice');
     if (r.section === 'cdnr' || r.section === 'cdnur') dup(r, r.data.ntNum, 'ntNum', 'note');
     if (r.section === 'nil' || r.section === 'hsn_b2b' || r.section === 'hsn_b2c') {
-      const k = r.section === 'nil' ? `nil|${r.data.splyTy}` : `${r.section}|${r.data.hsn}|${r.data.uqc}|${r.data.rt}`;
+      // Lines from different sources (Excel, manual, each marketplace) are summed by the JSON generator;
+      // a repeat inside one source is a data-entry mistake.
+      const k = `${sourceGroup(r)}|${r.section === 'nil' ? r.data.splyTy : `${r.section}|${r.data.hsn}|${r.data.uqc}|${r.data.rt}`}`;
       const first = keys.get(k);
-      if (first) adder(r, out)(r.section === 'nil' ? 'splyTy' : 'hsn', `Duplicate line (same as row ${first.source.rows[0]})`, { code: 'DUPLICATE_LINE', suggestion: 'Combine the two lines into one.' });
+      if (first) adder(r, out)(r.section === 'nil' ? 'splyTy' : 'hsn', `Duplicate line (same as ${where(first)})`, { code: 'DUPLICATE_LINE', suggestion: 'Combine the two lines into one.' });
       else keys.set(k, r);
     }
   }

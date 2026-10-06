@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Button, Empty, fmtDate, LicenseBadge, Notice, Panel } from '@/components/ui';
 import { call } from '@/lib/client';
 
@@ -11,7 +12,7 @@ interface Org {
   license: { status: string; id: string | null; key: string | null; expiresAt: string | null; daysLeft: number | null; plan: { name: string; limits: Limits } | null };
   usage: Limits;
 }
-interface Stats { orgs: number; licensed: number; expiringSoon: number; unlicensed: number; unusedKeys: number; users: number }
+interface Stats { orgs: number; licensed: number; expiringSoon: number; unlicensed: number; unusedKeys: number; users: number; pendingPayments: number }
 interface Pkg { _id: string; name: string; durationDays: number; active: boolean }
 
 const use = (used: number, max: number | undefined) => `${used}/${max ? max : '∞'}`;
@@ -59,6 +60,7 @@ export default function CustomersPage() {
           </div>
         ))}
       </div>
+      {!!stats?.pendingPayments && <Notice tone="warn">{stats.pendingPayments} payment{stats.pendingPayments > 1 ? 's are' : ' is'} waiting for approval. <Link href="/admin/payments" className="font-semibold underline">Review payments</Link></Notice>}
       {err && <Notice tone="error">{err}</Notice>}
       {!pkgs.length && orgs && <Notice tone="warn">Create a package first (Packages page) – then you can assign it to customers or generate license keys.</Notice>}
       <Panel title="Organisations" action={<input className="max-w-56" placeholder="Search name or email" value={filter} onChange={(e) => setFilter(e.target.value)} />}>

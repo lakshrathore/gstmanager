@@ -91,6 +91,8 @@ const GstReturnSchema = new Schema(
       sheetsSkipped: Mixed,
       importIssueCount: Number,
     },
+    /** One entry per marketplace (amazon, flipkart, meesho, generic): files and reconciliation summary of its last import. */
+    marketplaceImports: [{ _id: false, marketplace: String, label: String, importedAt: Date, etin: String, uqc: String, summary: Mixed }],
     summary: Mixed,
     lastValidatedAt: Date,
     currentJsonId: { type: ObjectId },
@@ -260,7 +262,7 @@ const SuperAdminSchema = new Schema(
   ts,
 );
 
-export const FEATURE_KEYS = ['validators', 'gstApi'] as const;
+export const FEATURE_KEYS = ['validators', 'gstApi', 'marketplaceImport', 'manualEntry'] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
 /** A sellable plan. 0 in a limit means unlimited. */
@@ -303,6 +305,46 @@ const LicenseSchema = new Schema(
   ts,
 );
 
+/** Platform-wide settings edited by the super admin (single document, key "platform"). */
+const PlatformSettingsSchema = new Schema(
+  {
+    key: { type: String, required: true, unique: true, default: 'platform' },
+    upiId: String,
+    payeeName: String,
+    /** Shown under the QR code, e.g. "Send the screenshot after paying; activation within 2 hours." */
+    paymentNote: String,
+  },
+  ts,
+);
+
+export const PAYMENT_STATUSES = ['pending', 'approved', 'rejected'] as const;
+
+/** Manual UPI payment: the firm pays by QR and submits the UTR + screenshot; the super admin approves. */
+const PaymentRequestSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true, index: true },
+    userId: { type: ObjectId, required: true },
+    userEmail: String,
+    packageId: { type: ObjectId, required: true },
+    packageName: String,
+    amountInr: { type: Number, required: true },
+    durationDays: Number,
+    upiId: String,
+    utr: { type: String, required: true, uppercase: true, trim: true },
+    note: String,
+    screenshot: { type: Buffer, select: false },
+    screenshotType: String,
+    screenshotSize: Number,
+    status: { type: String, enum: PAYMENT_STATUSES, default: 'pending', index: true },
+    reviewedAt: Date,
+    reviewedBy: String,
+    reviewNote: String,
+    licenseId: ObjectId,
+  },
+  ts,
+);
+PaymentRequestSchema.index({ utr: 1 });
+
 /* Audit (append-only, hash-chained per org) */
 
 const AuditLogSchema = new Schema({
@@ -342,6 +384,8 @@ export const GstProfile = model('GstProfile', GstProfileSchema);
 export const SuperAdmin = model('SuperAdmin', SuperAdminSchema);
 export const Package = model('Package', PackageSchema);
 export const License = model('License', LicenseSchema);
+export const PlatformSettings = model('PlatformSettings', PlatformSettingsSchema);
+export const PaymentRequest = model('PaymentRequest', PaymentRequestSchema);
 export const AuditLog = model('AuditLog', AuditLogSchema);
 
 export type CompanyDoc = InferSchemaType<typeof CompanySchema> & { _id: Types.ObjectId };

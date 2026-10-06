@@ -32,8 +32,11 @@ export interface LicenseState {
   key: string | null;
   expiresAt: Date | null;
   daysLeft: number | null;
-  plan: { id: string; name: string; limits: Record<LimitKey, number>; features: FeatureKey[] } | null;
+  /** limits = package limits + extras (0 stays unlimited); baseLimits = the package alone. */
+  plan: { id: string; name: string; limits: Record<LimitKey, number>; baseLimits: Record<LimitKey, number>; extras: Record<LimitKey, number>; features: FeatureKey[] } | null;
 }
+
+const LIMIT_KEYS = ['companies', 'users', 'returnsPerMonth'] as const;
 
 const DAY = 86_400_000;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
@@ -60,11 +63,12 @@ export async function licenseState(orgId: string | Types.ObjectId): Promise<Lice
     expiresAt,
     daysLeft: expiresAt ? Math.max(0, Math.ceil((expiresAt.getTime() - Date.now()) / DAY)) : null,
     plan: pkg
-      ? {
-          id: String(pkg._id), name: pkg.name,
-          limits: { companies: pkg.limits?.companies ?? 0, users: pkg.limits?.users ?? 0, returnsPerMonth: pkg.limits?.returnsPerMonth ?? 0 },
-          features: (pkg.features ?? []) as FeatureKey[],
-        }
+      ? (() => {
+          const base = Object.fromEntries(LIMIT_KEYS.map((k) => [k, pkg.limits?.[k] ?? 0])) as Record<LimitKey, number>;
+          const extras = Object.fromEntries(LIMIT_KEYS.map((k) => [k, lic.extras?.[k] ?? 0])) as Record<LimitKey, number>;
+          const limits = Object.fromEntries(LIMIT_KEYS.map((k) => [k, base[k] ? base[k] + extras[k] : 0])) as Record<LimitKey, number>;
+          return { id: String(pkg._id), name: pkg.name, limits, baseLimits: base, extras, features: (pkg.features ?? []) as FeatureKey[] };
+        })()
       : null,
   };
 }
@@ -105,7 +109,7 @@ export async function assertWithinLimit(orgId: string, what: LimitKey) {
   const max = st.plan?.limits[what] ?? 0;
   if (!max) return;
   const used = (await usage(orgId))[what];
-  if (used >= max) throw new HttpError(402, `Your ${st.plan!.name} plan allows ${max} ${LIMITS[what].toLowerCase()} (using ${used}). Upgrade your package to add more.`);
+  if (used >= max) throw new HttpError(402, `Your ${st.plan!.name} plan allows ${max} ${LIMITS[what].toLowerCase()} (using ${used}). Buy an add-on or upgrade your plan on the License page.`);
 }
 
 /**

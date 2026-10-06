@@ -35,6 +35,9 @@ export const PATCH = adminApi(async (req, { admin, params }) => {
       lic.issuedTo = b.issuedTo;
       lic.note = b.note;
       break;
+    case 'extras':
+      lic.set('extras', { companies: b.companies, users: b.users, returnsPerMonth: b.returnsPerMonth });
+      break;
   }
   await lic.save();
   if (b.action !== 'note') await auditForOrg(admin, lic.orgId, `license.${b.action}`, 'License', String(lic._id), { ...b, expiresAt: lic.expiresAt });

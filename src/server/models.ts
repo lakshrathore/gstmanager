@@ -301,6 +301,12 @@ const LicenseSchema = new Schema(
     issuedTo: String,
     note: String,
     createdBy: ObjectId,
+    /** Add-ons bought on top of the package limits; they end with this license. */
+    extras: {
+      companies: { type: Number, default: 0 },
+      users: { type: Number, default: 0 },
+      returnsPerMonth: { type: Number, default: 0 },
+    },
   },
   ts,
 );
@@ -313,6 +319,12 @@ const PlatformSettingsSchema = new Schema(
     payeeName: String,
     /** Shown under the QR code, e.g. "Send the screenshot after paying; activation within 2 hours." */
     paymentNote: String,
+    /** Add-on prices in ₹ (0 = not sold): per extra company, per extra team member, per block of 10 returns/month. */
+    addonPrices: {
+      companies: { type: Number, default: 0 },
+      users: { type: Number, default: 0 },
+      returnsPerMonth: { type: Number, default: 0 },
+    },
   },
   ts,
 );
@@ -325,8 +337,14 @@ const PaymentRequestSchema = new Schema(
     orgId: { type: ObjectId, required: true, index: true },
     userId: { type: ObjectId, required: true },
     userEmail: String,
-    packageId: { type: ObjectId, required: true },
+    /** "package" buys/renews a plan; "addon" adds capacity to the current license. */
+    kind: { type: String, enum: ['package', 'addon'], default: 'package' },
+    packageId: ObjectId,
     packageName: String,
+    /** Add-on quantities (returnsPerMonth in returns, i.e. blocks × 10). */
+    addon: { companies: Number, users: Number, returnsPerMonth: Number },
+    /** The license the add-on is for. */
+    forLicenseId: ObjectId,
     amountInr: { type: Number, required: true },
     durationDays: Number,
     upiId: String,

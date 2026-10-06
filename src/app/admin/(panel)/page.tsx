@@ -9,13 +9,13 @@ type Limits = { companies: number; users: number; returnsPerMonth: number };
 interface Org {
   _id: string; name: string; createdAt: string;
   owner: { name: string; email: string } | null;
-  license: { status: string; id: string | null; key: string | null; expiresAt: string | null; daysLeft: number | null; plan: { name: string; limits: Limits } | null };
+  license: { status: string; id: string | null; key: string | null; expiresAt: string | null; daysLeft: number | null; plan: { name: string; limits: Limits; extras?: Limits } | null };
   usage: Limits;
 }
 interface Stats { orgs: number; licensed: number; expiringSoon: number; unlicensed: number; unusedKeys: number; users: number; pendingPayments: number }
 interface Pkg { _id: string; name: string; durationDays: number; active: boolean }
 
-const use = (used: number, max: number | undefined) => `${used}/${max ? max : '∞'}`;
+const use = (used: number, max: number | undefined, extra?: number) => `${used}/${max ? max : '∞'}${extra ? ` (+${extra})` : ''}`;
 
 export default function CustomersPage() {
   const [orgs, setOrgs] = useState<Org[] | null>(null);
@@ -34,6 +34,15 @@ export default function CustomersPage() {
   async function act(fn: () => Promise<unknown>) {
     setErr(null);
     try { await fn(); await load(); } catch (x) { setErr((x as Error).message); }
+  }
+
+  /** Set add-ons by hand (e.g. a free extra company): "companies, team members, returns per month". */
+  function setExtras(licenseId: string, cur?: Limits) {
+    const v = prompt('Add-ons on top of the plan – companies, team members, returns per month (e.g. 1, 0, 10):', `${cur?.companies ?? 0}, ${cur?.users ?? 0}, ${cur?.returnsPerMonth ?? 0}`);
+    if (v == null) return;
+    const [companies, users, returnsPerMonth] = v.split(',').map((x) => Number(x.trim()));
+    if ([companies, users, returnsPerMonth].some((n) => !Number.isInteger(n) || n < 0)) { setErr('Enter three whole numbers, e.g. 1, 0, 10'); return; }
+    act(() => call(`/api/admin/licenses/${licenseId}`, { method: 'PATCH', json: { action: 'extras', companies, users, returnsPerMonth } }));
   }
 
   async function assign(e: React.FormEvent<HTMLFormElement>, orgId: string) {
@@ -90,13 +99,14 @@ export default function CustomersPage() {
                       <td>{L.plan?.name ?? '—'}</td>
                       <td><LicenseBadge status={L.status} /></td>
                       <td className="whitespace-nowrap">{fmtDate(L.expiresAt)}{L.status === 'active' && L.daysLeft != null && <p className={`text-[12px] ${L.daysLeft <= 7 ? 'text-amber' : 'text-ink-soft'}`}>{L.daysLeft} days left</p>}</td>
-                      <td className="num">{use(o.usage.companies, L.plan?.limits.companies)}</td>
-                      <td className="num">{use(o.usage.users, L.plan?.limits.users)}</td>
-                      <td className="num">{use(o.usage.returnsPerMonth, L.plan?.limits.returnsPerMonth)}</td>
+                      <td className="num">{use(o.usage.companies, L.plan?.limits.companies, L.plan?.extras?.companies)}</td>
+                      <td className="num">{use(o.usage.users, L.plan?.limits.users, L.plan?.extras?.users)}</td>
+                      <td className="num">{use(o.usage.returnsPerMonth, L.plan?.limits.returnsPerMonth, L.plan?.extras?.returnsPerMonth)}</td>
                       <td>
                         <div className="flex flex-wrap justify-end gap-1">
                           <Button variant="secondary" disabled={!pkgs.length} onClick={() => setAssigning(o._id)}>{L.status === 'none' ? 'Assign plan' : 'Change / renew'}</Button>
                           {L.id && L.status !== 'revoked' && <Button variant="ghost" onClick={() => act(() => call(`/api/admin/licenses/${L.id}`, { method: 'PATCH', json: { action: 'extend', days: 30 } }))}>+30 days</Button>}
+                          {L.id && L.status !== 'revoked' && <Button variant="ghost" onClick={() => setExtras(L.id!, L.plan?.extras)}>Add-ons</Button>}
                           {L.id && L.status === 'active' && <Button variant="ghost" onClick={() => act(() => call(`/api/admin/licenses/${L.id}`, { method: 'PATCH', json: { action: 'suspend' } }))}>Suspend</Button>}
                           {L.id && L.status === 'suspended' && <Button variant="ghost" onClick={() => act(() => call(`/api/admin/licenses/${L.id}`, { method: 'PATCH', json: { action: 'resume' } }))}>Resume</Button>}
                         </div>

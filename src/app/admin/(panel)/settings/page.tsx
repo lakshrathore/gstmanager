@@ -4,8 +4,9 @@ import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 import { Button, Notice, Panel } from '@/components/ui';
 import { call } from '@/lib/client';
+import { ADDON_LABELS, type AddonKey } from '@/lib/upi';
 
-interface Settings { upiId: string; payeeName: string; paymentNote: string }
+interface Settings { upiId: string; payeeName: string; paymentNote: string; addonPrices: Record<AddonKey, number> }
 
 export default function AdminSettingsPage() {
   const [s, setS] = useState<Settings | null>(null);
@@ -53,6 +54,22 @@ export default function AdminSettingsPage() {
               <p className="mt-2 text-[12px] text-ink-soft">Scan it with your phone to check the name and UPI ID are right (you don&apos;t have to pay).</p>
             </div>
           </div>
+        )}
+      </Panel>
+      <Panel title="Add-on prices">
+        {s && (
+          <form onSubmit={save} className="grid gap-4">
+            <p className="text-ink-soft">Customers can buy these on top of their plan (only for limits their plan actually has). Add-ons last until that plan ends. Leave 0 to not sell an add-on.</p>
+            <div className="grid gap-4 sm:grid-cols-3">
+              {(Object.keys(ADDON_LABELS) as AddonKey[]).map((k) => (
+                <label key={k}>{ADDON_LABELS[k]} (₹)
+                  <input type="number" min={0} step="1" className="num" value={s.addonPrices[k]}
+                    onChange={(e) => setS({ ...s, addonPrices: { ...s.addonPrices, [k]: Number(e.target.value) || 0 } })} />
+                </label>
+              ))}
+            </div>
+            <div><Button busy={busy} type="submit">Save prices</Button></div>
+          </form>
         )}
       </Panel>
     </div>

@@ -8,7 +8,7 @@ import { call } from '@/lib/client';
 
 type Limits = { companies: number; users: number; returnsPerMonth: number };
 interface Info {
-  license: { status: string; key: string | null; expiresAt: string | null; daysLeft: number | null; plan: { name: string; limits: Limits; features: string[] } | null };
+  license: { status: string; key: string | null; expiresAt: string | null; daysLeft: number | null; plan: { name: string; limits: Limits; extras?: Limits; features: string[] } | null };
   usage: Limits;
   limitLabels: Record<string, string>;
   featureLabels: Record<string, string>;
@@ -66,7 +66,7 @@ export default function LicensePage() {
                   const pct = max ? Math.min(100, Math.round((used / max) * 100)) : 0;
                   return (
                     <div key={k}>
-                      <div className="flex justify-between text-[13px]"><span>{info.limitLabels[k]}</span><span className="num">{used} / {max || '∞'}</span></div>
+                      <div className="flex justify-between text-[13px]"><span>{info.limitLabels[k]}</span><span className="num">{used} / {max || '∞'}{L.plan!.extras?.[k] ? <span className="text-ink-soft"> (incl. +{L.plan!.extras[k]} add-on)</span> : null}</span></div>
                       <div className="mt-1 h-2 rounded bg-black/5">
                         <div className={`h-2 rounded ${pct >= 100 ? 'bg-red-ink' : pct >= 80 ? 'bg-amber' : 'bg-ledger'}`} style={{ width: `${max ? pct : 0}%` }} />
                       </div>

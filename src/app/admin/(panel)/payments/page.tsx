@@ -5,7 +5,7 @@ import { Button, Empty, fmtDate, Notice, Panel } from '@/components/ui';
 import { call } from '@/lib/client';
 
 interface Payment {
-  _id: string; orgName: string; userEmail: string; packageName: string; amountInr: number; durationDays: number;
+  _id: string; kind?: string; orgName: string; userEmail: string; packageName: string; amountInr: number; durationDays?: number;
   utr: string; note?: string; status: string; reviewNote?: string; reviewedBy?: string; reviewedAt?: string; createdAt: string; screenshotSize?: number;
 }
 
@@ -24,7 +24,8 @@ export default function PaymentsPage() {
   async function review(p: Payment, action: 'approve' | 'reject') {
     const note = action === 'reject' ? prompt('Reason for rejecting (the customer will see this):', 'Payment not received – please check the UTR') : undefined;
     if (action === 'reject' && !note) return;
-    if (action === 'approve' && !confirm(`Approve ₹${p.amountInr.toLocaleString('en-IN')} from ${p.orgName}? A ${p.packageName} license (${p.durationDays} days) will be activated for them.`)) return;
+    const effect = p.kind === 'addon' ? `${p.packageName} will be added to their current plan.` : `A ${p.packageName} license (${p.durationDays} days) will be activated for them.`;
+    if (action === 'approve' && !confirm(`Approve ₹${p.amountInr.toLocaleString('en-IN')} from ${p.orgName}? ${effect}`)) return;
     setBusy(true);
     setErr(null);
     try {
@@ -53,7 +54,7 @@ export default function PaymentsPage() {
                   <tr key={p._id}>
                     <td className="whitespace-nowrap">{fmtDate(p.createdAt)}<p className="text-[12px] text-ink-soft">{new Date(p.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</p></td>
                     <td><p className="font-medium">{p.orgName}</p><p className="text-[12px] text-ink-soft">{p.userEmail}</p></td>
-                    <td>{p.packageName}<p className="text-[12px] text-ink-soft">{p.durationDays} days</p></td>
+                    <td>{p.packageName}<p className="text-[12px] text-ink-soft">{p.kind === 'addon' ? 'Add-on to current plan' : `${p.durationDays} days`}</p></td>
                     <td className="num text-right font-semibold">₹{p.amountInr.toLocaleString('en-IN')}</td>
                     <td className="num">{p.utr}{p.note && <p className="text-[12px] text-ink-soft">{p.note}</p>}</td>
                     <td>

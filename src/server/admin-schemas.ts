@@ -35,4 +35,9 @@ export const LicenseAction = z.discriminatedUnion('action', [
   z.object({ action: z.literal('revoke') }),
   z.object({ action: z.literal('extend'), days: z.coerce.number().int().min(-3650).max(3650) }),
   z.object({ action: z.literal('note'), issuedTo: z.string().max(120).optional(), note: z.string().max(500).optional() }),
+  /** Set the add-ons on a license by hand (absolute numbers). */
+  z.object({
+    action: z.literal('extras'),
+    companies: z.coerce.number().int().min(0).max(10_000), users: z.coerce.number().int().min(0).max(10_000), returnsPerMonth: z.coerce.number().int().min(0).max(100_000),
+  }),
 ]);

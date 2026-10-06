@@ -210,3 +210,70 @@ export async function booksTemplate() {
   ws.columns.forEach((c) => { c.width = 18; });
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
+
+const SOURCE_LABEL: Record<PurchaseSource, string> = { books: 'Purchase register', gstr2a: 'GSTR-2A', gstr2b: 'GSTR-2B' };
+const ddmmyyyy = (iso?: string) => (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}` : iso ?? '');
+const yesNo = (v?: boolean | null) => (v == null ? '' : v ? 'Yes' : 'No');
+
+/**
+ * The stored documents of one source (uploaded or fetched from the GST portal) as an Excel workbook.
+ * Portal data uses the GST portal's sheet and column names (B2B, B2BA, CDNR, CDNRA), and books use the
+ * template columns, so a downloaded file can be uploaded again.
+ */
+export async function downloadSource(auth: Auth, companyId: string, fp: string, source: PurchaseSource) {
+  checkPeriod(fp);
+  const company = await loadCompany(auth, companyId);
+  const docs = (await PurchaseDocModel.find({ ...scope(auth, companyId), fp, source }).sort({ supplierGstin: 1, docDate: 1 }).lean())
+    .map((d) => lean(d as unknown as Record<string, unknown>));
+  if (!docs.length) throw new HttpError(404, `No ${SOURCE_LABEL[source]} data for this period`);
+  const wb = new ExcelJS.Workbook();
+  const title = `${SOURCE_LABEL[source]} – ${company.name} (${company.gstin}) – ${fp.slice(0, 2)}/${fp.slice(2)}`;
+
+  if (source === 'books') {
+    const ws = wb.addWorksheet('Purchase register');
+    ws.addRow(['Supplier GSTIN', 'Supplier Name', 'Document Type', 'Invoice No', 'Invoice Date', 'Place of Supply', 'Reverse Charge', 'Taxable Value', 'IGST', 'CGST', 'SGST', 'Cess', 'Invoice Value']).font = { bold: true };
+    for (const d of docs) {
+      ws.addRow([d.supplierGstin, d.supplierName ?? '', d.docType === 'CN' ? 'Credit Note' : d.docType === 'DN' ? 'Debit Note' : 'Invoice', d.docNo, ddmmyyyy(d.docDate), d.pos ?? '', d.rcm == null ? '' : d.rcm ? 'Y' : 'N', d.taxable, d.igst, d.cgst, d.sgst, d.cess, d.invoiceValue ?? '']);
+    }
+    ws.columns.forEach((c) => { c.width = 18; });
+  } else {
+    const inv = ['GSTIN of supplier', 'Trade/Legal name', 'Invoice number', 'Invoice Date', 'Invoice Value(₹)'];
+    const note = ['GSTIN of supplier', 'Trade/Legal name', 'Note number', 'Note type', 'Note date', 'Note Value (₹)'];
+    const tail = ['Place of supply', 'Supply Attract Reverse Charge', 'Taxable Value (₹)', 'Integrated Tax(₹)', 'Central Tax(₹)', 'State/UT Tax(₹)', 'Cess(₹)',
+      'GSTR-1/IFF/GSTR-5 Period', 'GSTR-1/IFF/GSTR-5 Filing Date', 'GSTR-1/5 Filing Status', 'ITC Availability', 'Reason', 'Effective date of cancellation'];
+    const sheets: { name: string; head: string[]; pick: (d: PurchaseDoc) => boolean; amended: boolean; isNote: boolean }[] = [
+      { name: 'B2B', head: [...inv, ...tail], pick: (d) => d.docType === 'INV' && !d.amended, amended: false, isNote: false },
+      { name: 'B2BA', head: ['Original Invoice number', ...inv, ...tail], pick: (d) => d.docType === 'INV' && !!d.amended, amended: true, isNote: false },
+      { name: 'CDNR', head: [...note, ...tail], pick: (d) => d.docType !== 'INV' && !d.amended, amended: false, isNote: true },
+      { name: 'CDNRA', head: ['Original Note number', ...note, ...tail], pick: (d) => d.docType !== 'INV' && !!d.amended, amended: true, isNote: true },
+    ];
+    for (const s of sheets) {
+      const rows = docs.filter(s.pick);
+      if (!rows.length) continue;
+      const ws = wb.addWorksheet(s.name);
+      ws.addRow([title]).font = { bold: true };
+      ws.addRow([]);
+      ws.addRow(s.head).font = { bold: true };
+      for (const d of rows) {
+        const docCols = s.isNote
+          ? [d.supplierGstin, d.supplierName ?? '', d.docNo, d.docType === 'DN' ? 'Debit Note' : 'Credit Note', ddmmyyyy(d.docDate), d.invoiceValue ?? '']
+          : [d.supplierGstin, d.supplierName ?? '', d.docNo, ddmmyyyy(d.docDate), d.invoiceValue ?? ''];
+        ws.addRow([
+          ...(s.amended ? [d.originalDocNo ?? ''] : []), ...docCols,
+          d.pos ?? '', yesNo(d.rcm), d.taxable, d.igst, d.cgst, d.sgst, d.cess,
+          d.supplierPeriod ? `${d.supplierPeriod.slice(0, 2)}-${d.supplierPeriod.slice(2)}` : '', ddmmyyyy(d.supplierFilingDate), d.supplierFiled == null ? '' : d.supplierFiled ? 'Y' : 'N',
+          yesNo(d.itcAvailable), d.itcReason ?? '', ddmmyyyy(d.gstinCancelledOn),
+        ]);
+      }
+      ws.views = [{ state: 'frozen', ySplit: 3 }];
+      ws.columns.forEach((c, i) => { c.width = i < 2 || i >= s.head.length - 2 ? 24 : 15; });
+    }
+  }
+  const sum = wb.addWorksheet('Summary');
+  sum.addRows([[title], [], ['Documents', docs.length],
+    ['Taxable value (net of credit notes)', round(docs.reduce((a, d) => a + sgn(d) * d.taxable, 0))],
+    ['Tax (net of credit notes)', round(docs.reduce((a, d) => a + sgn(d) * totalTax(d), 0))]]);
+  sum.getRow(1).font = { bold: true };
+  sum.getColumn(1).width = 36;
+  return { buf: Buffer.from(await wb.xlsx.writeBuffer()), name: `${SOURCE_LABEL[source].replace(/\s+/g, '_')}_${company.gstin}_${fp}.xlsx` };
+}

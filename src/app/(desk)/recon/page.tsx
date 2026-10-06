@@ -264,6 +264,7 @@ function SourceCard({ s, imp, companyId, fp, onChange, setErr }: { s: (typeof SO
         <Button variant="secondary" busy={busy} onClick={() => input.current?.click()}>{imp ? 'Replace' : 'Upload'}</Button>
         {s.id !== 'books' && <Button variant="ghost" disabled={busy} onClick={fetchPortal}>Fetch from GST portal</Button>}
         {s.id === 'books' && <a className="self-center text-[12.5px] text-ledger underline" href="/api/recon/template">Template</a>}
+        {imp && <a className="inline-flex items-center rounded-md px-3.5 py-2 text-[13.5px] font-medium text-ink-soft hover:bg-black/5 hover:text-ink" href={`/api/recon/download?companyId=${companyId}&fp=${fp}&source=${s.id}`}>Download Excel</a>}
         {imp && <Button variant="ghost" disabled={busy} onClick={remove}>Remove</Button>}
       </div>
     </section>

@@ -1,10 +1,10 @@
 import 'server-only';
 import type { Auth } from '../../auth';
 import { HttpError } from '../../http';
-import { auditReturn } from '../gst-audit';
-import { describeGstnError, getGstClient, GstnError, GstnSessionError, GST_PORTAL_URL, type ClientContext } from '../gst-client';
+import { audit, auditReturn } from '../gst-audit';
+import { describeGstnError, getGstClient, GstnError, GstnSessionError, GST_PORTAL_URL, type ClientContext, type GstClient } from '../gst-client';
 import { maskUsername } from '../gst-client/sandbox-protocol';
-import { loadReturn } from '../gstr1';
+import { loadCompany, loadReturn } from '../gstr1';
 
 /**
  * How the taxpayer signs in to GSTN for this return.
@@ -50,35 +50,65 @@ export function gstnHttpError(e: unknown): never {
   throw e;
 }
 
-async function loginContext(auth: Auth, returnId: string) {
-  const { ret, company } = await loadReturn(auth, returnId);
-  const ctx: ClientContext = { orgId: auth.orgId, companyId: String(company._id), gstin: ret.gstin };
+interface LoginTarget {
+  ctx: ClientContext;
+  client: GstClient;
+  log: (action: string, meta: Record<string, unknown>) => Promise<unknown>;
+}
+
+function apiLoginClient() {
   const client = getGstClient();
   if (!client.capabilities.authenticate || !client.requestLoginOtp || !client.verifyLoginOtp) {
     throw new HttpError(409, 'This installation uses the manual GST portal workflow (GST_INTEGRATION=manual).');
   }
-  return { ret, ctx, client };
+  return client;
 }
 
-export async function requestLoginOtp(auth: Auth, returnId: string, username: string) {
+/** Login started from a GSTR-1 return (audited on the return). */
+async function returnTarget(auth: Auth, returnId: string): Promise<LoginTarget> {
+  const { ret, company } = await loadReturn(auth, returnId);
+  return {
+    ctx: { orgId: auth.orgId, companyId: String(company._id), gstin: ret.gstin }, client: apiLoginClient(),
+    log: (action, meta) => auditReturn(auth, ret, action, meta),
+  };
+}
+
+/** Login started for a company outside a GSTR-1 return (GSTR-3B, reconciliation). The session is the same one. */
+async function companyTarget(auth: Auth, companyId: string): Promise<LoginTarget> {
+  const company = await loadCompany(auth, companyId);
+  return {
+    ctx: { orgId: auth.orgId, companyId: String(company._id), gstin: company.gstin }, client: apiLoginClient(),
+    log: (action, meta) => audit(auth, action, 'Company', String(company._id), { gstin: company.gstin, ...meta }),
+  };
+}
+
+async function otp(auth: Auth, target: () => Promise<LoginTarget>, username: string) {
   const u = username.trim();
   if (!/^[A-Za-z0-9._@-]{3,64}$/.test(u)) throw new HttpError(422, 'Enter the GST portal username');
-  const { ret, ctx, client } = await loginContext(auth, returnId);
+  const { ctx, client, log } = await target();
   const res = await client.requestLoginOtp!(ctx, u, { userId: auth.userId, email: auth.email }).catch(gstnHttpError);
-  await auditReturn(auth, ret, 'gst.login_otp_requested', { client: client.id, username: maskUsername(u), transactionId: res.transactionId });
+  await log('gst.login_otp_requested', { client: client.id, username: maskUsername(u), transactionId: res.transactionId });
   return { ok: true };
 }
 
-export async function verifyLoginOtp(auth: Auth, returnId: string, otp: string) {
-  if (!/^\d{4,8}$/.test(otp.trim())) throw new HttpError(422, 'Enter the OTP exactly as received');
-  const { ret, ctx, client } = await loginContext(auth, returnId);
-  const s = await client.verifyLoginOtp!(ctx, otp.trim()).catch(gstnHttpError);
-  await auditReturn(auth, ret, 'gst.login', { client: client.id, username: s.connectedAs, sessionExpiresAt: s.expiresAt?.toISOString() });
+async function verify(target: () => Promise<LoginTarget>, code: string) {
+  if (!/^\d{4,8}$/.test(code.trim())) throw new HttpError(422, 'Enter the OTP exactly as received');
+  const { ctx, client, log } = await target();
+  const s = await client.verifyLoginOtp!(ctx, code.trim()).catch(gstnHttpError);
+  await log('gst.login', { client: client.id, username: s.connectedAs, sessionExpiresAt: s.expiresAt?.toISOString() });
   return { ok: true, expiresAt: s.expiresAt };
 }
 
-export async function endLogin(auth: Auth, returnId: string) {
-  const { ret, ctx, client } = await loginContext(auth, returnId);
+async function end(target: () => Promise<LoginTarget>) {
+  const { ctx, client, log } = await target();
   await client.endSession?.(ctx);
-  await auditReturn(auth, ret, 'gst.logout', { client: client.id });
+  await log('gst.logout', { client: client.id });
 }
+
+export const requestLoginOtp = (auth: Auth, returnId: string, username: string) => otp(auth, () => returnTarget(auth, returnId), username);
+export const verifyLoginOtp = (auth: Auth, returnId: string, code: string) => verify(() => returnTarget(auth, returnId), code);
+export const endLogin = (auth: Auth, returnId: string) => end(() => returnTarget(auth, returnId));
+
+export const requestCompanyLoginOtp = (auth: Auth, companyId: string, username: string) => otp(auth, () => companyTarget(auth, companyId), username);
+export const verifyCompanyLoginOtp = (auth: Auth, companyId: string, code: string) => verify(() => companyTarget(auth, companyId), code);
+export const endCompanyLogin = (auth: Auth, companyId: string) => end(() => companyTarget(auth, companyId));

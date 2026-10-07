@@ -207,12 +207,15 @@ export function filingsFrom(inner: unknown): FiledReturn[] {
   return Array.isArray(i.EFiledlist) ? i.EFiledlist : [];
 }
 
-/** The filed GSTR-1 for this period, if GSTN lists one with an ARN. */
-export function findGstr1Filing(list: FiledReturn[], fp: string): FiledReturn | undefined {
+/** The filed return of a type ("GSTR1", "GSTR3B") for this period, if GSTN lists one with an ARN. */
+export function findFiling(list: FiledReturn[], fp: string, rtntype: 'GSTR1' | 'GSTR3B'): FiledReturn | undefined {
   return list.find(
-    (r) => (r.rtntype ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '') === 'GSTR1' && r.ret_prd === fp && /filed/i.test(r.status ?? '') && !!r.arn,
+    (r) => (r.rtntype ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '') === rtntype && r.ret_prd === fp && /filed/i.test(r.status ?? '') && !!r.arn,
   );
 }
+
+/** The filed GSTR-1 for this period, if GSTN lists one with an ARN. */
+export const findGstr1Filing = (list: FiledReturn[], fp: string) => findFiling(list, fp, 'GSTR1');
 
 /** GSTN dates are dd-mm-yyyy. */
 export function parseGstnDate(s?: string): Date | null {

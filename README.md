@@ -133,6 +133,22 @@ Set `GST_INTEGRATION=manual` to go back to the manual portal workflow at any tim
 
 GSTN's error codes and messages are shown as-is, for example `GSTN RET191114: Date is Invalid…` or `GSTN OTP0010: User does not have authorized signatory…`. A failed save moves the return back to *Ready for upload* with GSTN's reason in the status history.
 
+### GSTR-3B flow
+
+GSTR-3B has its own page (**GSTR-3B** in the sidebar). Pick the company and period. The GST login is the same per-company session used by GSTR-1, and you can log in from either page.
+
+| Step | In the app | Sandbox API | Status / evidence |
+|---|---|---|---|
+| 1. Get | **Fetch from GST portal** | Get GSTR-3B Details, Liability Auto Calc, Cash ITC Balance, Track Returns | Values GSTN auto-calculated (from GSTR-1/IFF and GSTR-2B) and values saved on the portal are shown side by side, and either can be used. Untouched tables start from the saved values, or else from the auto-calculation. A return already set off or filed on the portal is picked up here |
+| 2. Prepare | Edit tables 3.1, 3.1.1, 3.2, 4, 5 and 5.1 → **Save draft** | none | 4(C) is always worked out from 4(A) − 4(B) |
+| 3. Save | **Save to GSTN**, then the status is checked every 10 s | Save GSTR-3B, GST Return Status | *Saving* → *Saved*. GSTN errors put the return back to *Draft* with GSTN's messages |
+| 4. Offset | Review the tax payable, the cash and credit ledgers, and the suggested ITC set-off (sections 49/49A, rule 88A; editable) → confirm → **Offset liability** (owner/admin) | Get GSTR-3B Details, Cash ITC Balance, Offset Liability | Re-checked against GSTN's live figures before sending. If cash is short, the app says how much to deposit by PMT-06 challan. Request and response are kept as *offset* evidence. The return is now locked |
+| 5. File | **Fetch GSTN details again** → tick reviewed → PAN → **Send EVC OTP** → OTP → **File GSTR-3B** (owner/admin) | Generate EVC OTP (`gstr-3b`), File GSTR-3B (sends back the exact details reviewed), Track Returns | Acknowledgement, then *Filed* with GSTN's ARN |
+
+When every table is zero here and on the portal, step 3 becomes **File Nil GSTR-3B**: an EVC OTP, then filing with `isNil: "Y"`, with no save or set-off.
+
+The set-off adds this return's 4(C) ITC to the credit ledger balance by default, as the portal's *Payment of tax* screen does. If GSTN says the credit isn't enough because the ledger already includes it, untick that option.
+
 ### Test environment
 
 The Sandbox documentation uses these sample values, which are the ones to use against `https://test-api.sandbox.co.in`:

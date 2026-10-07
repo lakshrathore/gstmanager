@@ -9,6 +9,7 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
   const router = useRouter();
   const links = [
     { href: '/', label: 'Returns' },
+    { href: '/gstr3b', label: 'GSTR-3B' },
     { href: '/companies', label: 'Companies' },
     { href: '/recon', label: 'Reconciliation' },
     { href: '/tools', label: 'Validators' },

@@ -281,6 +281,61 @@ export const sandboxClient: GstClient = {
   },
 };
 
+/* ---------- GSTR-3B and ledgers ---------- */
+
+const gstr3bPath = (fp: string, suffix = '') => {
+  const { year, month } = splitPeriod(fp);
+  return `/gst/compliance/tax-payer/gstrs/gstr-3b/${year}/${month}${suffix}`;
+};
+
+type Raw = { inner: unknown; raw: Record<string, unknown>; transactionId?: string };
+const raw = (res: { data: Record<string, unknown>; inner: unknown; transactionId?: string }): Raw => ({ inner: res.inner, raw: res.data, transactionId: res.transactionId });
+
+/**
+ * GSTR-3B through the Sandbox API: get details → (auto-calculated liability) → save → status →
+ * ledger balance → offset liability → get details again → EVC OTP → file → track. Every call needs the
+ * company's taxpayer session (login OTP), shared with its GSTR-1.
+ */
+export const gstr3bApi = {
+  /** The return as GSTN holds it (saved values, and the payment table once saved). */
+  async details(ctx: ClientContext, fp: string) {
+    return raw(await withSession(ctx, (token) => request('GET', gstr3bPath(fp), { token })));
+  },
+  /** GSTN's auto-calculated liability and ITC (from GSTR-1/IFF and GSTR-2B). */
+  async autoLiability(ctx: ClientContext, fp: string) {
+    return raw(await withSession(ctx, (token) => request('GET', gstr3bPath(fp, '/auto-liability-calc'), { token })));
+  },
+  async save(ctx: ClientContext, fp: string, body: unknown) {
+    const res = await withSession(ctx, (token) => request('POST', gstr3bPath(fp), { token, body }));
+    const ref = (res.inner as { reference_id?: string } | undefined)?.reference_id ?? (res.data as { reference_id?: string }).reference_id;
+    return { ...raw(res), reference: typeof ref === 'string' && ref ? ref : undefined };
+  },
+  async status(ctx: ClientContext, fp: string, reference: string) {
+    return sandboxClient.uploadStatus!({ ...ctx, fp }, reference);
+  },
+  /** Cash and credit ledger balance as on date. */
+  async ledgerBalance(ctx: ClientContext, fp: string) {
+    const { year, month } = splitPeriod(fp);
+    return raw(await withSession(ctx, (token) => request('GET', `/gst/compliance/tax-payer/ledgers/bal/${year}/${month}`, { token })));
+  },
+  async offset(ctx: ClientContext, fp: string, body: unknown) {
+    return raw(await withSession(ctx, (token) => request('POST', gstr3bPath(fp, '/offset-liability'), { token, body })));
+  },
+  async requestEvcOtp(ctx: ClientContext, pan: string) {
+    return raw(await withSession(ctx, (token) => request('POST', '/gst/compliance/tax-payer/evc/otp', { token, query: { gstr: 'gstr-3b' }, body: { pan } })));
+  },
+  /** Files with EVC. The body is GSTN's own details response after the set-off (or the Nil body). */
+  async file(ctx: ClientContext, fp: string, pan: string, otp: string, body: unknown) {
+    const res = await withSession(ctx, (token) => request('POST', gstr3bPath(fp, '/file'), { token, query: { pan, otp }, body }));
+    return { ...raw(res), ackNum: ackNumber(res.data, res.inner) };
+  },
+  async track(ctx: ClientContext, fp: string) {
+    const { year, month } = splitPeriod(fp);
+    const res = await withSession(ctx, (token) => request('GET', `/gst/compliance/tax-payer/gstrs/${year}/${month}/track`, { token, query: { return_type: 'gstr-3b' } }));
+    return { ...raw(res), filings: filingsFrom(res.inner) };
+  },
+};
+
 /* ---------- public taxpayer search (no taxpayer login needed) ---------- */
 
 /** True when Sandbox API keys are configured, whatever GST_INTEGRATION is set to. */

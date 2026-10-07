@@ -174,7 +174,7 @@ const UploadJobSchema = new Schema(
   ts,
 );
 
-export const EVIDENCE_KINDS = ['upload_reference', 'error_report', 'processing_result', 'summary', 'acknowledgement', 'note'] as const;
+export const EVIDENCE_KINDS = ['upload_reference', 'error_report', 'processing_result', 'summary', 'acknowledgement', 'note', 'offset'] as const;
 
 /** Anything the user brings back from the GST portal: references, reports, acknowledgements. */
 const PortalEvidenceSchema = new Schema(
@@ -247,6 +247,56 @@ const GstProfileSchema = new Schema(
   ts,
 );
 GstProfileSchema.index({ orgId: 1, companyId: 1 }, { unique: true });
+
+/* GSTR-3B (one per company + period; filed through the GST API integration) */
+
+export const GSTR3B_STATUSES = ['draft', 'saving', 'saved', 'offset', 'filed'] as const;
+
+/**
+ * GSTR-3B: draft tables prepared in the app, what GSTN holds (saved values, auto-calculated liability,
+ * ledger balance) and each portal step. GSTN responses are kept as PortalEvidence with returnId = this _id.
+ */
+const Gstr3bSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    gstin: { type: String, required: true },
+    fp: { type: String, required: true }, // MMYYYY
+    status: { type: String, enum: GSTR3B_STATUSES, default: 'draft' },
+    /** Tables 3.1 – 5.1 as prepared here (GSTN's JSON shape). */
+    form: Mixed,
+    formSource: { type: String, enum: ['auto', 'portal', 'manual'] },
+    formUpdatedAt: Date,
+    formUpdatedBy: String,
+    /** GSTN snapshots from the last fetch. */
+    autoLiability: Mixed,
+    autoFetchedAt: Date,
+    portalForm: Mixed,
+    portalDetails: Mixed,
+    portalFetchedAt: Date,
+    ledger: Mixed,
+    ledgerFetchedAt: Date,
+    fetchNotes: [String],
+    portal: {
+      saveReference: String,
+      savedAt: Date,
+      saveErrors: [String],
+      detailsEvidenceId: ObjectId,
+      offsetEvidenceId: ObjectId,
+      offsetAt: Date,
+      evcRequestedAt: Date,
+      fileSubmittedAt: Date,
+      ackNum: String,
+      nil: Boolean,
+      arn: String,
+      filedOn: Date,
+      filedVia: String,
+    },
+    history: [{ _id: false, at: Date, from: String, to: String, note: String, byEmail: String }],
+  },
+  { ...ts, minimize: false },
+);
+Gstr3bSchema.index({ orgId: 1, companyId: 1, fp: 1 }, { unique: true });
 
 /* Purchases & ITC reconciliation (books ↔ GSTR-2A / GSTR-2B) */
 
@@ -476,6 +526,7 @@ export const PortalEvidence = model('PortalEvidence', PortalEvidenceSchema);
 export const GstApiSession = model('GstApiSession', GstApiSessionSchema);
 export const GstSession = model('GstSession', GstSessionSchema);
 export const GstProfile = model('GstProfile', GstProfileSchema);
+export const Gstr3b = model('Gstr3b', Gstr3bSchema);
 export const PurchaseDoc = model('PurchaseDoc', PurchaseDocSchema);
 export const PurchaseImport = model('PurchaseImport', PurchaseImportSchema);
 export const ReconDecision = model('ReconDecision', ReconDecisionSchema);
@@ -488,4 +539,5 @@ export const AuditLog = model('AuditLog', AuditLogSchema);
 
 export type CompanyDoc = InferSchemaType<typeof CompanySchema> & { _id: Types.ObjectId };
 export type GstReturnDoc = InferSchemaType<typeof GstReturnSchema> & { _id: Types.ObjectId };
+export type Gstr3bDoc = InferSchemaType<typeof Gstr3bSchema> & { _id: Types.ObjectId };
 export const oid = (s: string) => (Types.ObjectId.isValid(s) ? new Types.ObjectId(s) : null);

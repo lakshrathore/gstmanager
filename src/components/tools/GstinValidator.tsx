@@ -9,11 +9,11 @@ import { downloadCsv } from './csv';
 import { describeJsonGstins, gstinsFromJson } from './gstinsFromJson';
 
 interface Result { input: string; offline: GstinParts; profile?: TaxpayerProfile; lookupError?: string }
-type Mode = 'offline' | 'sandbox' | 'portal';
+type Mode = 'sandbox' | 'portal';
 interface Captcha { sessionId: string; image: string }
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
-  { id: 'offline', label: 'Offline check', hint: 'Checksum, state code, PAN and registration type. Instant and free, but it cannot tell whether the GSTIN is active.' },
+  // { id: 'offline', label: 'Offline check', hint: 'Checksum, state code, PAN and registration type. Instant and free, but it cannot tell whether the GSTIN is active.' },
   { id: 'sandbox', label: 'Sandbox API', hint: 'Live GSTN details (name, status, registration date, address) for many GSTINs at once through the Sandbox.co.in Search GSTIN API.' },
   { id: 'portal', label: 'GST portal (CAPTCHA)', hint: 'Free. Uses the public Search Taxpayer on the GST portal. You type the CAPTCHA the portal shows, once per GSTIN.' },
 ];
@@ -40,7 +40,7 @@ export function GstinValidator({ sandbox, initialText = '' }: { sandbox: boolean
       setLoaded({ tone: 'error', msg: `${f.name} is not valid JSON.` });
     }
   }
-  const [mode, setMode] = useState<Mode>('offline');
+  const [mode, setMode] = useState<Mode>(sandbox ? 'sandbox' : 'portal');
   const [results, setResults] = useState<Result[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -60,9 +60,9 @@ export function GstinValidator({ sandbox, initialText = '' }: { sandbox: boolean
   const update = (r: Result) => setResults((prev) => prev?.map((x) => (x.input === r.input ? r : x)) ?? [r]);
 
   const exportCsv = () => results && downloadCsv('gstin-check.csv',
-    ['GSTIN', 'Format', 'Reason', 'State', 'PAN', 'PAN holder', 'Registration type', 'Legal name', 'Trade name', 'Status', 'Registered', 'Cancelled', 'Taxpayer type', 'Constitution', 'Address', 'Lookup error'],
+    ['GSTIN', 'Format', 'Reason', 'State', 'PAN', 'PAN holder', 'Registration type', 'Legal name', 'Trade name', 'Mobile', 'Status', 'Registered', 'Cancelled', 'Taxpayer type', 'Constitution', 'Address', 'Lookup error'],
     results.map((r) => [r.input, r.offline.ok ? 'Valid' : 'Invalid', r.offline.reason ?? '', r.offline.stateName ?? '', r.offline.pan ?? '', r.offline.panHolder ?? '', r.offline.registrationType ?? '',
-      r.profile?.legalName ?? '', r.profile?.tradeName ?? '', r.profile?.status ?? '', r.profile?.registrationDate ?? '', r.profile?.cancellationDate ?? '',
+      r.profile?.legalName ?? '', r.profile?.tradeName ?? '', r.profile?.mobile ?? '', r.profile?.status ?? '', r.profile?.registrationDate ?? '', r.profile?.cancellationDate ?? '',
       r.profile?.taxpayerType ?? '', r.profile?.constitution ?? '', r.profile?.address ?? '', r.lookupError ?? '']));
 
   const counts = results && {
@@ -161,6 +161,7 @@ function ResultRow({ r, action, portal }: { r: Result; action: React.ReactNode; 
         <td>{r.offline.stateName ?? '—'}{r.offline.pan && <span className="num block text-[12px] text-ink-soft">{r.offline.pan} · {r.offline.panHolder}</span>}{r.offline.registrationType && <span className="block text-[12px] text-ink-soft">{r.offline.registrationType}</span>}</td>
         <td>
           {p ? <>{p.legalName ?? '—'}{p.tradeName && p.tradeName !== p.legalName && <span className="block text-[12.5px] text-ink-soft">{p.tradeName}</span>}
+            {p.mobile && <span className="mt-1 block text-[12.5px] text-ink-soft">Mobile: {p.mobile}</span>}
             <button className="mt-1 block text-[12.5px] text-ledger underline" onClick={() => setOpen(!open)}>{open ? 'Hide details' : 'Details'}</button></>
             : r.lookupError ? <span className="text-[12.5px] text-red-ink">{r.lookupError}</span> : <span className="text-ink-soft">{r.offline.ok && portal ? 'Not searched yet' : '—'}</span>}
         </td>
@@ -171,7 +172,7 @@ function ResultRow({ r, action, portal }: { r: Result; action: React.ReactNode; 
         <tr>
           <td colSpan={portal ? 6 : 5} className="bg-paper">
             <dl className="grid gap-x-6 gap-y-2 py-1 sm:grid-cols-3">
-              {([['Taxpayer type', p.taxpayerType], ['Constitution', p.constitution], ['E-invoice', p.einvoice], ['Nature of business', p.natureOfBusiness?.join(', ')],
+              {([['Taxpayer type', p.taxpayerType], ['Constitution', p.constitution], ['Mobile', p.mobile], ['E-invoice', p.einvoice], ['Nature of business', p.natureOfBusiness?.join(', ')],
                 ['State jurisdiction', p.stateJurisdiction], ['Centre jurisdiction', p.centreJurisdiction], ['Last updated', p.lastUpdated]] as const)
                 .filter(([, v]) => v).map(([k, v]) => <div key={k}><dt className="text-[12px] text-ink-soft">{k}</dt><dd>{v}</dd></div>)}
               {p.address && <div className="sm:col-span-3"><dt className="text-[12px] text-ink-soft">Principal place of business</dt><dd>{p.address}</dd></div>}

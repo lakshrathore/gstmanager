@@ -10,8 +10,11 @@ import { errorLines, findFiling, maskPan, PAN_RE, parseGstnDate, STATUS_CD_LABEL
 import { gstnHttpError, loginInfo } from '../gst-login';
 import { sessionState } from '../gst-session';
 import { loadCompany } from '../gstr1';
+import { readWorkbook } from '@/engine';
+import { STATE_CODES } from '@/engine/masters';
+import { gstr3bWorkbook } from './excel';
 import {
-  fromAutoLiability, isNilForm, isOffset, itcAvailable, itcNet, liabilityRows, nilFileBody, normalizeForm, offsetBody, parseLedger, planOffset,
+  fromAutoLiability, isNilForm, parseGstr3bExcel, isOffset, itcAvailable, itcNet, liabilityRows, nilFileBody, normalizeForm, offsetBody, parseLedger, planOffset,
   saveBody, type AutoLiability, type Gstr3bForm, type ItcUse, type LedgerBalance,
 } from './protocol';
 
@@ -234,6 +237,35 @@ export async function useValues(auth: Auth, companyId: string, fp: string, sourc
   if (status(doc) === 'saved' && source === 'auto') await move(auth, doc, 'draft', 'Replaced with auto-calculated values – save to GSTN again');
   await log(auth, doc, 'use_values', { source });
   return { ok: true };
+}
+
+/* ---------- Excel ---------- */
+
+/** The prepared tables as the GSTR-3B Excel template (blank when nothing is prepared yet). */
+export async function excelTemplate(auth: Auth, companyId: string, fp: string) {
+  const { company, doc } = await load(auth, companyId, fp);
+  const title = `GSTR-3B – ${company.name} (${company.gstin}) – ${fp.slice(0, 2)}/${fp.slice(2)}`;
+  return { fileName: `GSTR3B_${company.gstin}_${fp}.xlsx`, bytes: await gstr3bWorkbook(doc?.form ? normalizeForm(doc.form) : null, title) };
+}
+
+/** Replaces the prepared tables with an uploaded GSTR-3B Excel (template layout). */
+export async function importExcel(auth: Auth, companyId: string, fp: string, file: File) {
+  if (!/\.xlsx$/i.test(file.name)) throw new HttpError(400, 'Upload the GSTR-3B Excel template (.xlsx)');
+  if (file.size > 5 * 1024 * 1024) throw new HttpError(413, 'File too large (max 5 MB)');
+  const { doc } = await loadDoc(auth, companyId, fp);
+  assertStatus(doc, EDITABLE, 'import into the return');
+  let sheets;
+  try {
+    sheets = await readWorkbook(Buffer.from(await file.arrayBuffer()), 2000);
+  } catch (e) {
+    throw new HttpError(422, (e as Error).message);
+  }
+  const res = parseGstr3bExcel(sheets, STATE_CODES);
+  if (!res.read.tables && !res.read.interState && !res.read.inward) throw new HttpError(422, res.issues.join(' '));
+  await Gstr3b.updateOne({ _id: doc._id }, { $set: { form: res.form, formSource: 'excel', formUpdatedAt: new Date(), formUpdatedBy: auth.email } });
+  if (status(doc) === 'saved') await move(auth, doc, 'draft', `Imported ${file.name} – save to GSTN again`);
+  await log(auth, doc, 'import_excel', { fileName: file.name, ...res.read, issues: res.issues.length });
+  return { ok: true, read: res.read, issues: res.issues };
 }
 
 /* ---------- save ---------- */

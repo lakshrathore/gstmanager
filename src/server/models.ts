@@ -265,7 +265,7 @@ const Gstr3bSchema = new Schema(
     status: { type: String, enum: GSTR3B_STATUSES, default: 'draft' },
     /** Tables 3.1 – 5.1 as prepared here (GSTN's JSON shape). */
     form: Mixed,
-    formSource: { type: String, enum: ['auto', 'portal', 'manual'] },
+    formSource: { type: String, enum: ['auto', 'portal', 'manual', 'excel'] },
     formUpdatedAt: Date,
     formUpdatedBy: String,
     /** GSTN snapshots from the last fetch. */

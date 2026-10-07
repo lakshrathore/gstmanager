@@ -34,7 +34,7 @@ interface Overview {
 }
 
 const STATUS_LABEL: Record<Status, string> = { draft: 'Draft', saving: 'Saving to GSTN', saved: 'Saved on GSTN', offset: 'Liability offset', filed: 'Filed' };
-const SOURCE_LABEL: Record<string, string> = { auto: 'GSTN’s auto-calculated values', portal: 'values saved on the GST portal', manual: 'your edits' };
+const SOURCE_LABEL: Record<string, string> = { auto: 'GSTN’s auto-calculated values', portal: 'values saved on the GST portal', manual: 'your edits', excel: 'an Excel import' };
 const when = (s?: string | null) => (s ? new Date(s).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '');
 const POLL_MS = 10_000;
 const MAX_POLLS = 30;
@@ -119,6 +119,8 @@ export default function Gstr3bPage() {
   const [pan, setPan] = useState('');
   const [evcOtp, setEvcOtp] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [importIssues, setImportIssues] = useState<string[]>([]);
+  const excelInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     call<{ companies: Company[] }>('/api/companies').then((r) => { setCompanies(r.companies); if (r.companies[0]) setCompanyId(r.companies[0]._id); }).catch((e) => setMsg({ tone: 'error', text: e.message }));
@@ -165,6 +167,35 @@ export default function Gstr3bPage() {
 
   const s = o?.status;
   const editable = !!o && o.canEdit && (s === 'draft' || s === 'saved');
+
+  async function importExcel(file: File) {
+    if (excelInput.current) excelInput.current.value = '';
+    if ((draft && !confirm('Replace the prepared tables with this Excel file?')) || (dirty && !confirm('You have unsaved changes. Discard them?'))) return;
+    const fd = new FormData();
+    fd.append('companyId', companyId); fd.append('fp', fp); fd.append('file', file);
+    setBusy('excel'); setMsg(null); setImportIssues([]);
+    try {
+      const r = await call<{ read: { tables: number; interState: number; inward: number }; issues: string[] }>('/api/gstr3b/excel', { method: 'POST', body: fd });
+      setMsg({ tone: 'ok', text: `Imported ${file.name}: ${r.read.tables} table row(s), ${r.read.interState} inter-state row(s), ${r.read.inward} exempt inward row(s). Review the tables, then save to GSTN.` });
+      setImportIssues(r.issues);
+      await load();
+    } catch (e) {
+      setMsg({ tone: 'error', text: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  }
+  const excelButtons = o && (
+    <div className="flex flex-wrap items-center gap-3">
+      {editable && (
+        <>
+          <input ref={excelInput} type="file" accept=".xlsx" className="hidden" onChange={(e) => e.target.files?.[0] && importExcel(e.target.files[0])} />
+          <Button variant="secondary" onClick={() => excelInput.current?.click()} busy={busy === 'excel'} disabled={busy !== null}>Import from Excel</Button>
+        </>
+      )}
+      <a className="text-[13px] text-ledger underline" href={`/api/gstr3b/excel?companyId=${companyId}&fp=${fp}`}>{draft && !dirty ? 'Download these tables as Excel' : 'Download Excel template'}</a>
+    </div>
+  );
   const needLogin = o && o.api && !loggedIn && <Notice tone="warn">Log in to GST (right) to continue. GSTN sends the OTP; you type it here.</Notice>;
   const verified = !!o?.portal.detailsEvidenceId && verifiedFor === o.portal.detailsEvidenceId;
   const nilMode = !!o?.nilEligible && (s === 'draft' || s === 'saved');
@@ -223,10 +254,12 @@ export default function Gstr3bPage() {
                 </Step>
 
                 <Step n={2} title="Prepare the return" done={!!draft && s !== 'draft'}>
+                  {importIssues.length > 0 && <Notice tone="warn">Check these lines of the Excel file:<ul className="list-disc space-y-1 pl-4">{importIssues.map((x) => <li key={x}>{x}</li>)}</ul></Notice>}
                   {!draft ? (
                     <div className="space-y-2">
-                      <p className="text-ink-soft">Fetch from the GST portal to start from GSTN’s figures, or start with blank tables.</p>
-                      {editable && <Button variant="secondary" onClick={() => { setDraft(normalizeForm({})); setDirty(true); }}>Start with blank tables</Button>}
+                      <p className="text-ink-soft">Fetch from the GST portal to start from GSTN’s figures, import your figures from Excel, or start with blank tables.</p>
+                      {excelButtons}
+                      {editable && <Button variant="ghost" onClick={() => { setDraft(normalizeForm({})); setDirty(true); }}>Start with blank tables</Button>}
                     </div>
                   ) : (
                     <>
@@ -234,6 +267,7 @@ export default function Gstr3bPage() {
                         {o.formSource ? `Started from ${SOURCE_LABEL[o.formSource] ?? o.formSource}` : 'Blank tables'}{o.formUpdatedAt ? `, last changed ${when(o.formUpdatedAt)}${o.formUpdatedBy ? ` by ${o.formUpdatedBy}` : ''}` : ''}.
                         {!editable && s !== 'draft' && s !== 'saved' && ' Locked: GSTN does not allow changes after the liability is set off.'}
                       </p>
+                      {excelButtons}
                       <Gstr3bTables form={draft} onChange={editable ? (f) => { setDraft(f); setDirty(true); } : undefined} />
                       {editable && (
                         <div className="flex flex-wrap items-center gap-3">

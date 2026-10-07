@@ -399,3 +399,194 @@ export function offsetBody(rows: LiabilityRow[], plan: OffsetPlan) {
 
 /** Body for filing a Nil GSTR-3B (no save or set-off needed). */
 export const nilFileBody = (gstin: string, fp: string) => ({ ret_period: fp, gstin, isNil: 'Y' });
+
+/* ---------- Excel import / template ---------- */
+
+/** One row of the template's main sheet: code in the "Code" column, amounts under the head columns. */
+export interface ExcelRow {
+  code: string;
+  label: string;
+  fields: readonly (keyof Amt)[];
+  get: (f: Gstr3bForm) => Amt;
+  set: (f: Gstr3bForm, a: Amt) => void;
+}
+
+const itcRow = (table: 'itc_avl' | 'itc_rev' | 'itc_inelg', ty: string) => ({
+  fields: HEADS,
+  get: (f: Gstr3bForm): Amt => f.itc_elg[table].find((r) => r.ty === ty) ?? { iamt: 0, camt: 0, samt: 0, csamt: 0 },
+  set: (f: Gstr3bForm, a: Amt) => {
+    f.itc_elg[table] = f.itc_elg[table].map((r) => (r.ty === ty ? { ty, iamt: a.iamt ?? 0, camt: a.camt ?? 0, samt: a.samt ?? 0, csamt: a.csamt ?? 0 } : r));
+  },
+});
+
+export const EXCEL_ROWS: ExcelRow[] = [
+  { code: '3.1(a)', label: 'Outward taxable supplies (other than zero rated, nil rated and exempted)', fields: FIELDS.osup_det, get: (f) => f.sup_details.osup_det, set: (f, a) => { f.sup_details.osup_det = a; } },
+  { code: '3.1(b)', label: 'Outward taxable supplies (zero rated)', fields: FIELDS.osup_zero, get: (f) => f.sup_details.osup_zero, set: (f, a) => { f.sup_details.osup_zero = a; } },
+  { code: '3.1(c)', label: 'Other outward supplies (nil rated, exempted)', fields: FIELDS.osup_nil_exmp, get: (f) => f.sup_details.osup_nil_exmp, set: (f, a) => { f.sup_details.osup_nil_exmp = a; } },
+  { code: '3.1(d)', label: 'Inward supplies (liable to reverse charge)', fields: FIELDS.isup_rev, get: (f) => f.sup_details.isup_rev, set: (f, a) => { f.sup_details.isup_rev = a; } },
+  { code: '3.1(e)', label: 'Non-GST outward supplies', fields: FIELDS.osup_nongst, get: (f) => f.sup_details.osup_nongst, set: (f, a) => { f.sup_details.osup_nongst = a; } },
+  { code: '3.1.1(i)', label: 'Taxable supplies on which the e-commerce operator pays tax u/s 9(5)', fields: FIELDS.eco_sup, get: (f) => f.eco_dtls.eco_sup, set: (f, a) => { f.eco_dtls.eco_sup = a; } },
+  { code: '3.1.1(ii)', label: 'Taxable supplies made through an e-commerce operator u/s 9(5)', fields: FIELDS.eco_reg_sup, get: (f) => f.eco_dtls.eco_reg_sup, set: (f, a) => { f.eco_dtls.eco_reg_sup = a; } },
+  { code: '4A(1)', label: 'ITC available – import of goods', ...itcRow('itc_avl', 'IMPG') },
+  { code: '4A(2)', label: 'ITC available – import of services', ...itcRow('itc_avl', 'IMPS') },
+  { code: '4A(3)', label: 'ITC available – inward supplies liable to reverse charge', ...itcRow('itc_avl', 'ISRC') },
+  { code: '4A(4)', label: 'ITC available – inward supplies from ISD', ...itcRow('itc_avl', 'ISD') },
+  { code: '4A(5)', label: 'ITC available – all other ITC', ...itcRow('itc_avl', 'OTH') },
+  { code: '4B(1)', label: 'ITC reversed – as per rules 38, 42 & 43 and section 17(5)', ...itcRow('itc_rev', 'RUL') },
+  { code: '4B(2)', label: 'ITC reversed – others', ...itcRow('itc_rev', 'OTH') },
+  { code: '4D(1)', label: 'ITC reclaimed which was reversed under 4(B)(2) earlier', ...itcRow('itc_inelg', 'RUL') },
+  { code: '4D(2)', label: 'Ineligible ITC under section 16(4) & ITC restricted due to PoS rules', ...itcRow('itc_inelg', 'OTH') },
+  { code: '5.1 Interest', label: 'Interest', fields: FIELDS.intr_details, get: (f) => f.intr_ltfee.intr_details, set: (f, a) => { f.intr_ltfee.intr_details = a; } },
+  { code: '5.1 Late fee', label: 'Late fee', fields: ['camt', 'samt'], get: (f) => f.intr_ltfee.ltfee_details, set: (f, a) => { f.intr_ltfee.ltfee_details = a; } },
+];
+
+export const EXCEL_AMT_COLS: { key: keyof Amt; label: string }[] = [
+  { key: 'txval', label: 'Taxable value' }, { key: 'iamt', label: 'IGST' }, { key: 'camt', label: 'CGST' }, { key: 'samt', label: 'SGST/UTGST' }, { key: 'csamt', label: 'Cess' },
+];
+export const EXCEL_INWARD_ROWS: { code: string; ty: 'GST' | 'NONGST'; label: string }[] = [
+  { code: '5(a)', ty: 'GST', label: 'From a supplier under composition scheme, exempt and nil rated supply' },
+  { code: '5(b)', ty: 'NONGST', label: 'Non-GST supply' },
+];
+export const EXCEL_POS_TYPES: { key: keyof Gstr3bForm['inter_sup']; label: string }[] = [
+  { key: 'unreg_details', label: 'Unregistered persons' },
+  { key: 'comp_details', label: 'Composition taxable persons' },
+  { key: 'uin_details', label: 'UIN holders' },
+];
+
+/** "3.1 (a)" → "31a", "SGST/UTGST" → "sgstutgst": comparisons ignore case, spaces and punctuation. */
+const norm = (v: unknown) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const fieldName = (k: keyof Amt) => (k === 'txval' ? 'taxable value' : HEAD_LABEL[k]);
+
+/** Amount from a cell: numbers, "1,23,456.78", "(100)" for negatives; blank is 0; anything else null. */
+function amount(v: unknown): number | null {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return r2(v);
+  const s = String(v).trim().replace(/[₹,\s]/g, '');
+  if (!s || s === '-') return 0;
+  const neg = /^\(.*\)$/.test(s);
+  const n = Number(neg ? s.slice(1, -1) : s);
+  return Number.isFinite(n) ? r2(neg ? -n : n) : null;
+}
+
+const HEADER: Record<string, string[]> = {
+  code: ['code', 'table', 'tableno'],
+  txval: ['taxablevalue', 'totaltaxablevalue', 'taxable'],
+  iamt: ['igst', 'integratedtax'],
+  camt: ['cgst', 'centraltax'],
+  samt: ['sgstutgst', 'sgst', 'stateuttax', 'statetax', 'utgst'],
+  csamt: ['cess'],
+  inter: ['interstate', 'interstatesupplies'],
+  intra: ['intrastate', 'intrastatesupplies'],
+  type: ['type', 'suppliesmadeto', 'madeto', 'category'],
+  pos: ['placeofsupply', 'pos', 'placeofsupplystateut'],
+};
+
+/** Column positions from the first row (within the first 15) that names at least two known columns. */
+function header(rows: unknown[][]): { at: number; col: Record<string, number> } | null {
+  for (let i = 0; i < Math.min(rows.length, 15); i++) {
+    const col: Record<string, number> = {};
+    (rows[i] ?? []).forEach((c, j) => {
+      const n = norm(c);
+      for (const [k, names] of Object.entries(HEADER)) if (col[k] == null && names.includes(n)) col[k] = j;
+    });
+    if (Object.keys(col).length >= 2) return { at: i, col };
+  }
+  return null;
+}
+
+/** "29", 29, "29-Karnataka" or a state name → "29"; null if not a state code. */
+export function posCode(v: unknown, states: Record<string, string>): string | null {
+  const s = String(v ?? '').trim();
+  const m = /^(\d{1,2})(\D|$)/.exec(s);
+  if (m) { const c = m[1].padStart(2, '0'); return states[c] && c !== '96' ? c : null; }
+  const n = norm(s);
+  return Object.entries(states).find(([c, name]) => c !== '96' && norm(name) === n)?.[0] ?? null;
+}
+
+export interface ExcelImport {
+  form: Gstr3bForm;
+  /** Rows taken from each part, to tell the user what was read. */
+  read: { tables: number; interState: number; inward: number };
+  issues: string[];
+}
+
+/**
+ * Reads the GSTR-3B Excel template, or any sheet laid out the same way. Rows of tables 3.1 – 5.1 are
+ * found by their code in the "Code" column, table 5 by 5(a)/5(b), and 3.2 by "Type" + "Place of
+ * supply". Sheets are recognised by their header row, so they may be renamed or reordered. Anything
+ * that cannot be read is reported, never guessed.
+ */
+export function parseGstr3bExcel(sheets: { name: string; rows: unknown[][] }[], states: Record<string, string>): ExcelImport {
+  const form = blankForm();
+  const issues: string[] = [];
+  const read = { tables: 0, interState: 0, inward: 0 };
+  const byCode = new Map(EXCEL_ROWS.map((r) => [norm(r.code), r]));
+  const inwardByCode = new Map(EXCEL_INWARD_ROWS.map((r) => [norm(r.code), r]));
+  const seen = new Set<string>();
+
+  for (const sh of sheets) {
+    const h = header(sh.rows);
+    if (!h) continue;
+    const { col } = h;
+    const at = (row: unknown[], k: string) => (col[k] == null ? undefined : row[col[k]]);
+    const where = (i: number) => `${sh.name} row ${i + 1}`;
+
+    for (let i = h.at + 1; i < sh.rows.length; i++) {
+      const row = sh.rows[i] ?? [];
+      if (!row.some((c) => c != null && String(c).trim() !== '')) continue;
+
+      // 3.2: type + place of supply + taxable value + IGST
+      if (col.pos != null && col.type != null) {
+        const tyText = norm(at(row, 'type'));
+        if (!tyText) continue;
+        const ty = EXCEL_POS_TYPES.find((t) => norm(t.label).startsWith(tyText.slice(0, 4)) || tyText.startsWith(norm(t.label).slice(0, 4)));
+        if (!ty) { issues.push(`${where(i)}: type "${String(at(row, 'type'))}" is not Unregistered persons, Composition taxable persons or UIN holders – row skipped.`); continue; }
+        const pos = posCode(at(row, 'pos'), states);
+        if (!pos) { issues.push(`${where(i)}: place of supply "${String(at(row, 'pos') ?? '')}" is not a valid state code – row skipped.`); continue; }
+        const txval = amount(at(row, 'txval'));
+        const iamt = amount(at(row, 'iamt'));
+        if (txval == null || iamt == null) { issues.push(`${where(i)}: taxable value or IGST is not a number – row skipped.`); continue; }
+        if (!txval && !iamt) continue;
+        const same = form.inter_sup[ty.key].find((r) => r.pos === pos);
+        if (same) { same.txval = r2(same.txval + txval); same.iamt = r2(same.iamt + iamt); } else form.inter_sup[ty.key].push({ pos, txval, iamt });
+        read.interState++;
+        continue;
+      }
+
+      const code = norm(at(row, 'code') ?? row[0]);
+      if (!code) continue;
+
+      // Table 5: inter-state / intra-state
+      const inward = col.inter != null ? inwardByCode.get(code) : undefined;
+      if (inward) {
+        const inter = amount(at(row, 'inter'));
+        const intra = amount(at(row, 'intra'));
+        if (inter == null || intra == null) { issues.push(`${where(i)}: ${inward.code} is not a number – row skipped.`); continue; }
+        form.inward_sup.isup_details = form.inward_sup.isup_details.map((r) => (r.ty === inward.ty ? { ...r, inter, intra } : r));
+        read.inward++;
+        continue;
+      }
+
+      const def = byCode.get(code);
+      if (!def) continue; // headings, totals and notes
+      if (seen.has(def.code)) issues.push(`${where(i)}: ${def.code} appears more than once – the last one is used.`);
+      seen.add(def.code);
+      const a: Amt = {};
+      let bad = false;
+      for (const { key } of EXCEL_AMT_COLS) {
+        const raw = at(row, key);
+        const v = amount(raw);
+        if (v == null) { issues.push(`${where(i)}: ${def.code} ${fieldName(key)} "${String(raw)}" is not a number – row skipped.`); bad = true; continue; }
+        if (def.fields.includes(key)) a[key] = v;
+        else if (v) issues.push(`${where(i)}: ${def.code} has no ${fieldName(key)} on the GST portal – ${v} ignored.`);
+      }
+      if (bad) continue;
+      def.set(form, { ...def.get(form), ...a });
+      read.tables++;
+    }
+  }
+  if (!read.tables && !read.interState && !read.inward) {
+    issues.unshift('No GSTR-3B rows found. Use the GSTR-3B Excel template: a "Code" column with 3.1(a) … 5.1 Late fee, and columns Taxable value, IGST, CGST, SGST/UTGST, Cess.');
+  }
+  return { form: normalizeForm(form), read, issues };
+}

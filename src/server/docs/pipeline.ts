@@ -149,7 +149,7 @@ async function readDoc(doc: ClientDocDoc, bytes: Buffer, client: { name: string;
       }
       return fromRules(s);
     }
-    if (!aiConfigured()) return { kind: 'other', reason: 'Spreadsheet layout not recognised', method: 'rules', confidence: 0.3, period: '', gstins: [], records: [], notes: ['The columns were not recognised as a register, GSTN file or bank statement. Set ANTHROPIC_API_KEY to let AI read it.'] };
+    if (!aiConfigured()) return { kind: 'other', reason: 'Spreadsheet layout not recognised', method: 'rules', confidence: 0.3, period: '', gstins: [], records: [], notes: ['The columns were not recognised as a register, GSTN file or bank statement. Set up AI (AI_PROVIDER with its API key) to let AI read it.'] };
     return ai({ type: 'text', text: tablesAsText(tables) }, 'Spreadsheet layout not recognised by the rules – read by AI.');
   }
   if (e === 'xls') throw new AiError('Old Excel format (.xls): open it in Excel and save as .xlsx, then upload again.');

@@ -1,10 +1,11 @@
 import 'server-only';
 import { HttpError } from './http';
+import { aiNotSetUp } from './ai-provider';
 import { licenseState } from './license';
 import { AiUsage, oid } from './models';
 
 /**
- * Document AI metering: every Claude API call is priced from its token counts and the model's list
+ * Document AI metering: every Claude or Groq API call is priced from its token counts and the model's list
  * price, recorded against the organisation, and checked against the package's monthly allowance
  * (Package.aiBudgetInr) before the next call. Prices are per million tokens in US$.
  */
@@ -16,6 +17,11 @@ const PRICES: { match: RegExp; input: number; output: number; cacheRead: number;
   { match: /sonnet-5/, input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   { match: /sonnet/, input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   { match: /haiku/, input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  // Groq
+  { match: /gpt-oss-120b/, input: 0.15, output: 0.6, cacheRead: 0.075, cacheWrite: 0 },
+  { match: /gpt-oss-20b/, input: 0.075, output: 0.3, cacheRead: 0.0375, cacheWrite: 0 },
+  { match: /qwen/, input: 0.8, output: 4, cacheRead: 0.4, cacheWrite: 0 },
+  { match: /llama/, input: 0.59, output: 0.79, cacheRead: 0.3, cacheWrite: 0 },
 ];
 const USD_INR = Number(process.env.USD_INR) || 85;
 
@@ -86,7 +92,7 @@ export async function aiUsageSummary(orgId: string) {
 
 /** For the screens: can Document AI be used right now, and if not, why. */
 export async function aiStatus(orgId: string, configured: boolean) {
-  if (!configured) return { configured, allowed: false, reason: 'The Claude API is not set up on this server (ANTHROPIC_API_KEY).' };
+  if (!configured) return { configured, allowed: false, reason: aiNotSetUp() };
   try {
     await assertAiAllowed(orgId);
     return { configured, allowed: true, reason: null as string | null };

@@ -71,7 +71,7 @@ export default function PackagesPage() {
             ))}
             <p className="self-end pb-2 text-[12.5px] text-ink-soft">0 = unlimited</p>
             <label>Document AI per month (₹)<input name="aiBudgetInr" type="number" min={0} step="1" defaultValue={current.aiBudgetInr ?? 0} /></label>
-            <p className="self-end pb-2 text-[12.5px] text-ink-soft sm:col-span-3">Claude API spend allowed per calendar month when “Document AI” is ticked below (0 = no limit). Calls are refused once it is used up.</p>
+            <p className="self-end pb-2 text-[12.5px] text-ink-soft sm:col-span-3">AI API spend (Claude or Groq) allowed per calendar month when “Document AI” is ticked below (0 = no limit). Calls are refused once it is used up.</p>
             <fieldset className="sm:col-span-2">
               <legend className="mb-1 text-[12.5px] text-ink-soft">Features</legend>
               {Object.entries(featureLabels).map(([k, label]) => (

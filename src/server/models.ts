@@ -506,6 +506,8 @@ const AssistantChatSchema = new Schema(
     userId: { type: ObjectId, required: true },
     companyId: { type: ObjectId, required: true },
     title: String,
+    /** Which AI service the stored messages are for ("claude" when missing); another one starts from the turns' text. */
+    provider: String,
     messages: { type: [Mixed], select: false },
     turns: [{ _id: false, role: String, text: String, tools: Mixed, at: Date, error: Boolean }],
     usage: { inputTokens: { type: Number, default: 0 }, outputTokens: { type: Number, default: 0 }, cacheReadTokens: { type: Number, default: 0 } },
@@ -514,7 +516,7 @@ const AssistantChatSchema = new Schema(
 );
 AssistantChatSchema.index({ orgId: 1, userId: 1, companyId: 1, updatedAt: -1 });
 
-/** One Claude API call made for an organisation – what it cost, for the monthly AI allowance. */
+/** One AI API call (Claude or Groq) made for an organisation – what it cost, for the monthly AI allowance. */
 const AiUsageSchema = new Schema(
   {
     orgId: { type: ObjectId, required: true },

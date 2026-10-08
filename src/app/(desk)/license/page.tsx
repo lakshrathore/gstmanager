@@ -21,7 +21,7 @@ interface Info {
 const rupee = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const monthName = (m: string) => new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 
-/** Claude API spend this month against the plan's allowance, and the last months by use. */
+/** AI API (Claude or Groq) spend this month against the plan's allowance, and the last months by use. */
 function AiUsagePanel({ ai }: { ai: Info['ai'] }) {
   const pct = ai.budgetInr ? Math.min(100, Math.round((ai.spentInr / ai.budgetInr) * 100)) : 0;
   return (
@@ -50,7 +50,7 @@ function AiUsagePanel({ ai }: { ai: Info['ai'] }) {
               </table>
             </div>
           )}
-          <p className="text-[12px] text-ink-soft">Worked out from the tokens of each Claude API call at list prices. “Assistant answers” counts API calls – one question can take several.</p>
+          <p className="text-[12px] text-ink-soft">Worked out from the tokens of each AI API call (Claude or Groq) at list prices. “Assistant answers” counts API calls – one question can take several.</p>
         </div>
       )}
     </Panel>

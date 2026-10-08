@@ -3,9 +3,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import { DOC_KINDS } from '@/engine/docs';
+import { aiConfigured, aiNotSetUp, aiProvider } from '../ai-provider';
+import { extractWithGroq } from './ai-groq';
+
+export { aiConfigured };
 
 /**
- * Reads a document Claude can see – PDF (text or scanned), image, or plain text (Word, unknown
+ * Reads a document the AI can see – PDF (text or scanned), image, or plain text (Word, unknown
  * spreadsheets) – and returns what it is plus every invoice or bank transaction in it, as JSON that
  * matches a fixed schema. Unreadable values come back empty and are listed as uncertain; nothing is
  * guessed.
@@ -13,8 +17,6 @@ import { DOC_KINDS } from '@/engine/docs';
 
 export const DOC_AI_MODEL = process.env.DOC_AI_MODEL || 'claude-opus-5-5';
 const EFFORT = (process.env.DOC_AI_EFFORT as 'low' | 'medium' | 'high' | undefined) || 'medium';
-
-export const aiConfigured = () => !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 
 let client: Anthropic | null = null;
 const anthropic = () => (client ??= new Anthropic({ maxRetries: 3 }));
@@ -79,7 +81,8 @@ export type AiInput =
 export class AiError extends Error {}
 
 export async function extractWithAi(input: AiInput, context: { fileName: string; client?: { name: string; gstin: string } | null; otherClients: { name: string; gstin: string }[] }) {
-  if (!aiConfigured()) throw new AiError('Reading PDFs, scans and images needs the Claude API: set ANTHROPIC_API_KEY in .env.local and restart.');
+  if (!aiConfigured()) throw new AiError(`Reading PDFs, scans and images needs AI. ${aiNotSetUp()}`);
+  if (aiProvider() === 'groq') return extractWithGroq(input, context, { system: SYSTEM, schema: Extraction, fail: (m) => new AiError(m) });
   const source: Anthropic.Beta.BetaContentBlockParam = input.type === 'pdf'
     ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: input.bytes.toString('base64') } }
     : input.type === 'image'

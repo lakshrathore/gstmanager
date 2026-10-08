@@ -41,7 +41,8 @@ async function docFor(auth: Auth, id: string) {
 
 /* ---------- upload ---------- */
 
-export async function upload(auth: Auth, target: string, files: File[]) {
+/** `kind` is set when the type is known for sure (a return downloaded from the GST portal). */
+export async function upload(auth: Auth, target: string, files: File[], opts: { kind?: DocKind } = {}) {
   const company = target === 'auto' ? null : await loadCompany(auth, target);
   if (!company && !seesAll(auth)) throw new HttpError(403, 'Pick the client to upload for.');
   const batchId = new Types.ObjectId().toString();
@@ -56,7 +57,7 @@ export async function upload(auth: Auth, target: string, files: File[]) {
     const fileId = await putFile(bytes, f.name, CONTENT_TYPE[extOf(f.name)] ?? 'application/octet-stream', { orgId: auth.orgId });
     const doc = await ClientDoc.create({
       orgId: oid(auth.orgId), companyId: company?._id ?? same?.companyId ?? null, fileId, fileName: f.name.slice(0, 250), contentType: CONTENT_TYPE[extOf(f.name)],
-      sizeBytes: f.size, sha256, batchId, uploadedBy: auth.email,
+      sizeBytes: f.size, sha256, batchId, uploadedBy: auth.email, ...(opts.kind ? { kindOverride: opts.kind } : {}),
       ...(same ? { status: 'duplicate', duplicateOf: same._id, error: `Same file as ${same.fileName} (already uploaded) – not processed again.` } : {}),
     });
     out.push({ fileName: f.name, id: String(doc._id), status: doc.status });

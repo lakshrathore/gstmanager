@@ -59,6 +59,23 @@ describe('structured files', () => {
     expect(g1.records.every((x) => x.kind === 'invoice' && x.direction === 'sales')).toBe(true);
     expect(readStructuredTables([{ name: 'x', rows: [['hello', 'world']] }], 'notes.xlsx', CLIENT)).toBeNull();
   });
+
+  it('tells a GSTR-1 from the portal (b2b with "cfs") from a GSTR-2A', () => {
+    const inv = { inum: 'S-1', idt: '05-09-2026', val: 1180, pos: '27', rchrg: 'N', inv_typ: 'R', itms: [{ num: 1, itm_det: { rt: 18, txval: 1000, iamt: 180, csamt: 0 } }] };
+    const b2bOnly = { gstin: CLIENT, fp: '092026', b2b: [{ ctin: R_MH, cfs: 'Y', inv: [inv] }] };
+    // Content alone cannot tell; the known type or the file name decides.
+    expect(readStructuredJson(b2bOnly, 'data.json', CLIENT)!.kind).toBe('gstr2a');
+    expect(readStructuredJson(b2bOnly, 'data.json', CLIENT, 'gstr1')!.kind).toBe('gstr1');
+    expect(readStructuredJson(b2bOnly, 'GSTR1_29AABCS1234Q1Z0_092026.json', CLIENT)!.kind).toBe('gstr1');
+    // A GSTR-1-only section settles it.
+    const withHsn = { ...b2bOnly, hsn: { data: [{ num: 1, hsn_sc: '8471', rt: 18, txval: 1000, iamt: 180 }] } };
+    const g1 = readStructuredJson(withHsn, 'data.json', CLIENT)!;
+    expect(g1.kind).toBe('gstr1');
+    expect(g1.records.some((x) => x.kind === 'invoice' && x.data.invoiceNo === 'S-1')).toBe(true);
+    // GSTR-2A supplier fields, or the type given, keep a GSTR-2A a GSTR-2A.
+    expect(readStructuredJson({ gstin: CLIENT, fp: '092026', b2b: [{ ctin: R_MH, cfs: 'Y', cfs3b: 'Y', fldtr1: '11-10-2026', inv: [inv] }] }, 'GSTR1.json', CLIENT)!.kind).toBe('gstr2a');
+    expect(readStructuredJson(withHsn, 'x.json', CLIENT, 'gstr2a')!.kind).toBe('gstr2a');
+  });
 });
 
 describe('checks', () => {

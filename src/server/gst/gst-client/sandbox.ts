@@ -388,3 +388,56 @@ export async function fetchInwardReturn(ctx: ClientContext, kind: 'gstr2a' | 'gs
     }
   });
 }
+
+/* ---------- returns as GSTN holds them (download centre) ---------- */
+
+/** GSTR-1 sections fetched one by one and joined into one GSTN-format GSTR-1 JSON. */
+const GSTR1_SECTIONS = ['b2b', 'b2ba', 'b2cl', 'b2cla', 'b2cs', 'b2csa', 'cdnr', 'cdnra', 'cdnur', 'cdnura', 'exp', 'expa', 'at', 'ata', 'txp', 'txpa', 'hsn', 'nil', 'doc-issue'] as const;
+
+/**
+ * The whole GSTR-1 of a period from GSTN, section by section, merged into the shape of the portal's
+ * own GSTR-1 JSON ({ gstin, fp, b2b, cdnr, hsn, … }). Sections GSTN has nothing for are left out; a
+ * section that fails is noted and the rest still come back – unless every one fails.
+ */
+export async function fetchGstr1(ctx: ClientContext, fp: string): Promise<{ json: Record<string, unknown>; notes: string[] }> {
+  const { year, month } = splitPeriod(fp);
+  return withSession(ctx, async (token) => {
+    const json: Record<string, unknown> = { gstin: ctx.gstin, fp };
+    const notes: string[] = [];
+    let failed: GstnError | null = null;
+    let ok = 0;
+    for (const s of GSTR1_SECTIONS) {
+      try {
+        const { inner } = await request('GET', `/gst/compliance/tax-payer/gstrs/gstr-1/${s}/${year}/${month}`, { token });
+        ok++;
+        if (inner && typeof inner === 'object') {
+          for (const [k, v] of Object.entries(inner as Record<string, unknown>)) if (v != null && k !== 'gstin' && k !== 'fp') json[k] = v;
+        }
+      } catch (e) {
+        if (e instanceof GstnSessionError || !(e instanceof GstnError)) throw e;
+        // "No invoices/data found" comes back as an error code – it only means the section is empty.
+        if (/no (invoice|data|record|document)s?|not found|does not exist/i.test(e.message) || (e.code && NO_DATA.has(e.code))) { ok++; continue; }
+        failed ??= e;
+        notes.push(`${s.toUpperCase()}: ${e.message}${e.code ? ` (${e.code})` : ''}`);
+      }
+    }
+    if (!ok && failed) throw failed;
+    return { json, notes };
+  });
+}
+
+/** GSTR-9 as saved/filed on GSTN for a financial year ("2025-26"). */
+export async function fetchGstr9(ctx: ClientContext, fy: string): Promise<unknown> {
+  return withSession(ctx, async (token) => (await request('GET', '/gst/compliance/tax-payer/gstrs/gstr-9', { token, query: { financial_year: `FY ${fy}` } })).inner ?? {});
+}
+
+/** Electronic cash or credit (ITC) ledger between two dates (DD/MM/YYYY). */
+export async function fetchLedger(ctx: ClientContext, kind: 'cash' | 'itc', from: string, to: string): Promise<unknown> {
+  return withSession(ctx, async (token) => (await request('GET', `/gst/compliance/tax-payer/ledgers/${kind}`, { token, query: { from, to } })).inner ?? {});
+}
+
+/** Every return filed by a GSTIN in a financial year – public data, no taxpayer login needed. */
+export async function trackReturnsPublic(gstin: string, fy: string): Promise<unknown> {
+  const res = await request('POST', '/gst/compliance/public/gstrs/track', { token: await platformToken(), query: { financial_year: `FY ${fy}` }, body: { gstin } });
+  return res.inner ?? {};
+}

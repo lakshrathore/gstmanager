@@ -407,6 +407,35 @@ const ReconDecisionSchema = new Schema(
 );
 ReconDecisionSchema.index({ orgId: 1, companyId: 1, fp: 1, against: 1 });
 
+/* Returns downloaded from the GST portal (download centre) */
+
+/**
+ * One return, ledger or filing list fetched from GSTN for a company and period. GSTN's JSON is kept in
+ * GridFS (bucket "clientfiles"), so it can be downloaded again – as JSON or Excel – without another
+ * API call.
+ */
+const PortalFetchSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    gstin: { type: String, required: true },
+    /** gstr1 | gstr3b | gstr2a | gstr2b | gstr9 | cash_ledger | itc_ledger | filed */
+    type: { type: String, required: true },
+    /** MMYYYY for monthly returns, "2025-26" for yearly ones. */
+    period: { type: String, required: true },
+    fileId: ObjectId,
+    sizeBytes: Number,
+    /** Rows/documents GSTN returned (0 = nothing for this period). */
+    count: { type: Number, default: 0 },
+    notes: [String],
+    fetchedBy: String,
+    /** Set when the data was also added to Client documents. */
+    clientDocId: ObjectId,
+  },
+  ts,
+);
+PortalFetchSchema.index({ orgId: 1, companyId: 1, type: 1, period: 1 }, { unique: true });
+
 /* Client documents (upload → understand → extract → check) */
 
 export const DOC_STATUSES = ['queued', 'processing', 'processed', 'needs_review', 'failed', 'duplicate'] as const;
@@ -689,6 +718,7 @@ export const GstProfile = model('GstProfile', GstProfileSchema);
 export const Gstr3b = model('Gstr3b', Gstr3bSchema);
 export const AnnualReturn = model('AnnualReturn', AnnualReturnSchema);
 export const ClientDoc = model('ClientDoc', ClientDocSchema);
+export const PortalFetch = model('PortalFetch', PortalFetchSchema);
 export const DocRecord = model('DocRecord', DocRecordSchema);
 export const AssistantChat = model('AssistantChat', AssistantChatSchema);
 export const AiUsage = model('AiUsage', AiUsageSchema);

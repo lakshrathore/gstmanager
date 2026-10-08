@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Notice, Panel } from '@/components/ui';
+import { PortalDownloads } from '@/components/downloads/PortalDownloads';
 import { fyChoices } from '@/server/gst/annual/common';
 import { call, periodLabel } from '@/lib/client';
 
 /**
- * Download center: pick return types, companies, a period range and filing status; download each
- * return as JSON or Excel, or everything that matches as one ZIP.
+ * Download center. "Prepared in this app": pick return types, companies, a period range and filing
+ * status; download each return as JSON or Excel, or everything that matches as one ZIP. "From the GST
+ * portal": returns, ledgers and the filing list as GSTN holds them (PortalDownloads).
  */
 
 type Type = 'gstr1' | 'gstr3b' | 'gstr9' | 'gstr9c';
@@ -44,6 +46,7 @@ export default function DownloadsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [loadedQuery, setLoadedQuery] = useState('');
   const [zipping, setZipping] = useState(false);
+  const [tab, setTab] = useState<'app' | 'portal'>('app');
 
   useEffect(() => {
     call<{ companies: Company[] }>('/api/companies').then((r) => setCompanies(r.companies)).catch((e) => setErr(e.message));
@@ -91,9 +94,18 @@ export default function DownloadsPage() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div>
         <h1 className="text-[24px] font-semibold tracking-tight">Download returns</h1>
-        <p className="text-ink-soft">GSTR-1, GSTR-3B, GSTR-9 and GSTR-9C prepared here, filtered by company, period and status – one at a time or all as a ZIP.</p>
+        <p className="text-ink-soft">{tab === 'app'
+          ? 'GSTR-1, GSTR-3B, GSTR-9 and GSTR-9C prepared here, filtered by company, period and status – one at a time or all as a ZIP.'
+          : 'Returns, ledgers and the filing list as the GST portal holds them – fetched with your GST login, then downloaded as JSON or Excel.'}</p>
+      </div>
+      <div role="tablist" className="flex gap-1 border-b border-rule">
+        {([['app', 'Prepared in this app'], ['portal', 'From the GST portal']] as const).map(([k, l]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+            className={`-mb-px border-b-2 px-4 py-2 text-[14px] ${tab === k ? 'border-ink font-semibold' : 'border-transparent text-ink-soft hover:text-ink'}`}>{l}</button>
+        ))}
       </div>
       {err && <Notice tone="error">{err}</Notice>}
+      {tab === 'portal' ? <PortalDownloads companies={companies} /> : (<>
 
       <Panel title="Filters">
         <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr_1fr]">
@@ -188,6 +200,7 @@ export default function DownloadsPage() {
             )}
         {items && items.length > 0 && !ready && <p className="mt-3 text-[13px] text-ink-soft">None of these returns has a {FORMAT_LABEL[format]} file yet.</p>}
       </Panel>
+      </>)}
     </div>
   );
 }

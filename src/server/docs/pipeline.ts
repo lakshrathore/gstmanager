@@ -134,7 +134,7 @@ async function readDoc(doc: ClientDocDoc, bytes: Buffer, client: { name: string;
   if (e === 'json') {
     let json: unknown;
     try { json = JSON.parse(bytes.toString('utf8').replace(/^﻿/, '')); } catch { throw new AiError('The file is not valid JSON.'); }
-    const s = readStructuredJson(json, doc.fileName, gstin);
+    const s = readStructuredJson(json, doc.fileName, gstin, doc.kindOverride);
     if (s) return fromRules(s);
     return { kind: 'other', reason: 'JSON file of an unknown layout', method: 'rules', confidence: 0.3, period: '', gstins: [], records: [], notes: ['Not a GSTN JSON this app reads (GSTR-1, GSTR-2A, GSTR-2B, GSTR-3B).'] };
   }

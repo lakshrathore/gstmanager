@@ -157,8 +157,17 @@ export function readStructuredTables(tables: SheetTable[], fileName: string, cli
   return null;
 }
 
-/** Reads a GSTN JSON file (GSTR-1, GSTR-2A, GSTR-2B); null when it is something else. */
-export function readStructuredJson(json: unknown, fileName: string, clientGstin: string): StructuredRead | null {
+/** Sections only a GSTR-1 has, and supplier fields only GSTR-2A has. */
+const GSTR1_ONLY = ['b2cs', 'b2cl', 'hsn', 'doc_issue', 'nil', 'exp', 'at', 'txpd', 'cdnur', 'b2csa', 'b2cla', 'expa', 'ata', 'txpda', 'cdnura'];
+const GSTR2A_SUPPLIER = ['cfs3b', 'fldtr1', 'flprdr1', 'dtcancel'];
+
+/**
+ * Reads a GSTN JSON file (GSTR-1, GSTR-2A, GSTR-2B, GSTR-3B); null when it is something else. `hint`
+ * is the type when it is known (a return downloaded from the portal by type); otherwise the content
+ * decides, with the file name ("GSTR1…", "GSTR2A…") settling a GSTR-1 that has only B2B invoices
+ * (GSTN's GSTR-1 also carries the customer's filing status "cfs", like GSTR-2A).
+ */
+export function readStructuredJson(json: unknown, fileName: string, clientGstin: string, hint?: string | null): StructuredRead | null {
   if (!json || typeof json !== 'object') return null;
   const root = json as Record<string, unknown>;
   const data = (root.data && typeof root.data === 'object' ? root.data : root) as Record<string, unknown>;
@@ -173,14 +182,19 @@ export function readStructuredJson(json: unknown, fileName: string, clientGstin:
     };
   }
   const b2b = Array.isArray(data.b2b) ? (data.b2b as Record<string, unknown>[]) : [];
-  if (b2b.some((s) => 'cfs' in s || 'cfs3b' in s) || (Array.isArray(data.cdn) && !Array.isArray(data.cdnr))) {
+  // The known type first, then content that only one of them has, then the file name for a b2b-only file.
+  const is2a = hint === 'gstr2a' ? true : hint === 'gstr1' ? false
+    : GSTR1_ONLY.some((k) => k in data) ? false
+      : b2b.some((x) => GSTR2A_SUPPLIER.some((k) => k in x)) || (Array.isArray(data.cdn) && !Array.isArray(data.cdnr)) ? true
+        : b2b.some((x) => 'cfs' in x) && !/gstr[-_ ]?1(?![0-9a-z])/i.test(fileName);
+  if (is2a) {
     const res = readPortalJson(json, 'gstr2a', fileName, periodOf(data.fp));
     return {
       kind: 'gstr2a', reason: 'GSTR-2A JSON (supplier filing status)', period: periodOf(data.fp) || res.docs[0]?.period, ownerGstin,
       records: res.docs.map((d) => ({ kind: 'invoice', source: 'gstr2a', direction: 'purchase', data: purchaseDocToInvoice(d, gstinFor) })), notes: res.notes,
     };
   }
-  if ('fp' in data && (b2b.length || 'b2cs' in data || 'hsn' in data || 'cdnr' in data || 'exp' in data)) {
+  if (('fp' in data || hint === 'gstr1') && (b2b.length || 'b2cs' in data || 'hsn' in data || 'cdnr' in data || 'exp' in data)) {
     const period = periodOf(data.fp);
     return { kind: 'gstr1', reason: 'GSTR-1 JSON (fp, b2b/b2cs/hsn)', period, ownerGstin, records: gstr1ToInvoices(recordsFromGstr1Json(data), gstinFor, period), notes: [] };
   }

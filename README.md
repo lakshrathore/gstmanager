@@ -272,6 +272,18 @@ Files are stored in MongoDB GridFS (bucket `clientfiles`). "Start fresh" in Sett
   - GSTR-9 / GSTR-9C: as above.
 - **Each return** downloads on its own, or **Download all as ZIP** puts everything in `GSTIN/return/` folders. The ZIP has a README listing anything not included and why (e.g. JSON not generated, validation errors). Every download is audited.
 
+### From the GST portal
+
+The **From the GST portal** tab downloads returns as GSTN holds them, through the GST API integration (`GST_INTEGRATION=sandbox`, plan feature *GST API*).
+
+1. Pick a client and log in to GST with the OTP (the same login as GSTR-1/GSTR-3B; the filed returns list needs no login).
+2. Pick the returns and a financial year or month range, then **Download from GST portal**:
+   - monthly, for each month up to now: GSTR-1 (every section, joined into one GSTN-format JSON), GSTR-3B, GSTR-2B, GSTR-2A;
+   - yearly, for each financial year in the range: GSTR-9, the cash ledger, the credit (ITC) ledger and the filed returns list (ARN, dates).
+3. Each return/period is one request, with progress and **Stop**. A GSTR-1 section GSTN fails on is noted and the rest is kept. Login, permission or plan errors stop the run.
+4. What was fetched is kept, so it downloads again (**Excel** or **JSON**, or **Download all as ZIP**) without another API call. Periods already downloaded are skipped unless *Fetch again* is ticked; each fetch is a paid Sandbox call (GSTR-1 ≈ 19 per month).
+5. *Also add to Client documents* (on by default) puts GSTR-1, GSTR-3B, GSTR-2A and GSTR-2B there as well, typed exactly, for checks, search, reports and Purchase vs GSTR-2B.
+
 ## Validators
 
 Open **Validators** in the sidebar (any role can use it).

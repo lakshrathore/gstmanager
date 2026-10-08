@@ -9,6 +9,7 @@ export { profileForPeriod, FORMAT_PROFILES, type FormatProfile } from './config/
 export { parseGstr1Tables, type SheetTable } from './excel/parseGstr1';
 export { readWorkbook } from './excel/readWorkbook';
 export { SHEETS } from './excel/template';
+export { addTemplateSheets } from './excel/writeTemplate';
 export { validateReturn, validateRecord, type ValidationSummary } from './validation/validate';
 export { generateGstr1Json, type GenerationLog } from './json/generate';
 export { validateGstr1Json, GSTR1_SCHEMA, type SchemaError } from './json/schema';

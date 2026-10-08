@@ -18,7 +18,7 @@ export function ImportTab({ d, onDone }: { d: ReturnDetail; onDone: () => void }
 
   async function upload() {
     if (!file) return;
-    if (info && !confirm(`Replace the records imported from ${info.fileName}? Changes made to those records in the app will be lost. Manual entries and marketplace imports are kept.`)) return;
+    if (info && !confirm(`Replace the records imported from ${info.fileName}? Changes made to those records in the app will be lost. Manual entries are kept; a sales-report import is kept too unless this Excel contains the same invoices (e.g. this return’s own Excel download) – then it is replaced.`)) return;
     setBusy(true); setErr(null);
     const fd = new FormData();
     fd.append('file', file);

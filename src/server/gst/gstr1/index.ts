@@ -1,9 +1,9 @@
 import 'server-only';
 import { Types } from 'mongoose';
 import {
-  blankRecordData, financialYear, generateGstr1Json, SECTIONS, naturalKey, parseGstr1Tables, periodBounds, profileForPeriod,
+  blankRecordData, financialYear, MARKETPLACES, generateGstr1Json, SECTIONS, naturalKey, parseGstr1Tables, periodBounds, profileForPeriod,
   readWorkbook, recomputeRecordTax, validateGstr1Json, validateReturn,
-  type AnyRecord, type ReturnContext, type Section,
+  type AnyRecord, type MarketplaceId, type ReturnContext, type Section,
 } from '@/engine';
 import { canAccessCompany, type Auth } from '../../auth';
 import { sha256 } from '../../crypto';
@@ -88,12 +88,31 @@ export async function importExcel(auth: Auth, returnId: string, file: File) {
   if (!parsed.sheetsParsed.length) throw new HttpError(422, 'No GSTR-1 sheets recognised in this workbook', parsed.sheetsSkipped);
 
   const base = { orgId: ret.orgId, returnId: ret._id };
-  // Replaces only what came from the Excel template; manual entries and marketplace imports stay.
+  // A workbook holding the same invoices/notes as a sales-report import (typically this return's own
+  // Excel download, corrected and imported back) replaces that import – otherwise every document
+  // would be in the return twice.
+  const docKey = (section: string, d: { inum?: string; ntNum?: string }) => `${section}|${String(d.inum ?? d.ntNum ?? '').trim().toUpperCase()}`;
+  const DOC_SECTIONS = ['b2b', 'b2cl', 'exp', 'cdnr', 'cdnur'];
+  const incoming = new Set(parsed.records.filter((r) => DOC_SECTIONS.includes(r.section)).map((r) => docKey(r.section, r.data as { inum?: string; ntNum?: string })));
+  const fromReports = incoming.size
+    ? await Gstr1Record.find({ ...base, section: { $in: DOC_SECTIONS }, 'source.sheet': /^mp:/ }).select({ section: 1, data: 1, 'source.sheet': 1 }).lean()
+    : [];
+  const replaced = [...new Set(fromReports.filter((r) => incoming.has(docKey(r.section, r.data as { inum?: string; ntNum?: string }))).map((r) => (r.source as { sheet: string }).sheet))];
+  // Replaces what came from the Excel template (and any sales-report import it repeats); manual entries stay.
+  const keep: RegExp = replaced.length ? new RegExp(`^(manual$|mp:(?!(${replaced.map((x) => x.slice(3).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$))`) : OTHER_SOURCES;
   await Promise.all([
-    Gstr1Record.deleteMany({ ...base, 'source.sheet': { $not: OTHER_SOURCES } }),
-    Gstr1Error.deleteMany({ ...base, $or: [{ origin: { $ne: 'import' } }, { sheet: { $not: OTHER_SOURCES } }] }),
+    Gstr1Record.deleteMany({ ...base, 'source.sheet': { $not: keep } }),
+    Gstr1Error.deleteMany({ ...base, $or: [{ origin: { $ne: 'import' } }, { sheet: { $not: keep } }] }),
     GeneratedJson.deleteMany(base),
   ]);
+  if (replaced.length) {
+    await GstReturn.updateOne({ _id: ret._id }, { $pull: { marketplaceImports: { marketplace: { $in: replaced.map((x) => x.slice(3)) } } } });
+    parsed.issues.push({
+      code: 'IMPORT_REPLACED_REPORT', severity: 'warning', section: 'b2b', recordKey: '', sheet: file.name, field: 'source',
+      message: `This workbook repeats the invoices of the ${replaced.map((x) => MARKETPLACES[x.slice(3) as MarketplaceId]?.label ?? x.slice(3)).join(', ')} import – that import was replaced by the workbook`,
+      suggestion: 'Nothing to do if the workbook is this return’s own Excel download. To use the sales report again, import it again.',
+    });
+  }
   for (let i = 0; i < parsed.records.length; i += 1000) {
     await Gstr1Record.insertMany(parsed.records.slice(i, i + 1000).map((r) => ({ ...base, section: r.section, key: r.key, source: r.source, data: r.data })), { ordered: false });
   }

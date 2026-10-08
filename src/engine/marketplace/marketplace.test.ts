@@ -1,7 +1,8 @@
+import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import { R_KA, R_MH, SUPPLIER } from '../../../scripts/sample-workbook';
 import {
-  buildMarketplaceRecords, generateGstr1Json, seriesGaps, gstinCheckDigit, parseCsv, profileForPeriod, readMarketplaceTables,
+  addTemplateSheets, buildMarketplaceRecords, generateGstr1Json, parseGstr1Tables, readWorkbook, seriesGaps, gstinCheckDigit, parseCsv, profileForPeriod, readMarketplaceTables,
   stateCode, validateGstr1Json, validateReturn, type AnyRecord, type BuildOptions, type ReturnContext, type SheetTable,
 } from '../index';
 
@@ -365,5 +366,28 @@ describe('generic sales register and merging sources', () => {
     expect(inv).toMatchObject({ cancel: 1 });
     expect(validateReturn(out.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
     expect(validateGstr1Json(generateGstr1Json(out.records, ctx).json).ok).toBe(true);
+  });
+
+  it('a return written as the offline-tool template imports back unchanged', async () => {
+    const head = ['Bill No', 'Bill Date', 'Ledger Name', 'GST No', 'Place of Supply', 'Item Name', 'HSN', 'Qty', 'Unit', 'GST Rate', 'Taxable Amount', 'IGST', 'CGST', 'SGST', 'Type'];
+    const t: SheetTable = { name: 'Sale Report', rows: [head,
+      ['B-1', '05/06/2025', 'Mumbai Traders', R_MH, 'Maharashtra', 'Widget', '8471', 10, 'Nos', 5, 1000, 50, 0, 0, 'Sale'],
+      ['B-1', '05/06/2025', 'Mumbai Traders', R_MH, 'Maharashtra', 'Cable', '8544', 5, 'Box', 18, 500, 90, 0, 0, 'Sale'],
+      ['B-2', '06/06/2025', 'Walk-in', '', 'Karnataka', 'Widget', '8471', 1, 'Nos', 5, 200, 0, 5, 5, 'Sale'],
+      ['B-3', '07/06/2025', 'Walk-in', '', 'Maharashtra', 'Widget', '8471', 100, 'Nos', 5, 120000, 6000, 0, 0, 'Sale'],
+      ['B-4', '07/06/2025', 'Walk-in', '', 'Karnataka', 'Medicine', '3004', 10, 'Btl', 0, 900, 0, 0, 0, 'Sale'],
+      ['CN-1', '08/06/2025', 'Mumbai Traders', R_MH, 'Maharashtra', 'Widget', '8471', 1, 'Nos', 5, 100, 5, 0, 0, 'Return'],
+    ] };
+    const built = buildMarketplaceRecords(readMarketplaceTables([t], 's.xlsx', 'auto', profile.allowedRates).lines, opts('generic')).records;
+    const wb = new ExcelJS.Workbook();
+    addTemplateSheets(wb, built);
+    const back = parseGstr1Tables(await readWorkbook(Buffer.from(await wb.xlsx.writeBuffer())), { supplierGstin: SUPPLIER, hsnSplit: profile.hsnSplit });
+    expect(back.issues.filter((i) => i.severity === 'error')).toEqual([]);
+    const count = (rs: AnyRecord[]) => Object.fromEntries([...new Set(rs.map((r) => r.section))].map((s) => [s, rs.filter((r) => r.section === s).length]));
+    expect(count(back.records)).toEqual(count(built));
+    // Same JSON from the re-imported records as from the original ones.
+    const strip = (j: Record<string, unknown>) => { const { hash: _h, ...rest } = j; void _h; return rest; };
+    expect(strip(generateGstr1Json(back.records, ctx).json)).toEqual(strip(generateGstr1Json(built, ctx).json));
+    expect(validateReturn(back.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
   });
 });

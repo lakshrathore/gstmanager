@@ -44,6 +44,15 @@ const CompanySchema = new Schema(
     stateCode: { type: String, required: true },
     aatoAbove5Cr: { type: Boolean, default: false },
     filingFrequency: { type: String, enum: ['monthly', 'quarterly'], default: 'monthly' },
+    /** GSTN's public taxpayer record, when the company was added from its GSTIN. */
+    legalName: String,
+    tradeName: String,
+    registrationStatus: String,
+    constitution: String,
+    taxpayerType: String,
+    registrationDate: String,
+    address: String,
+    profileFetchedAt: Date,
   },
   ts,
 );

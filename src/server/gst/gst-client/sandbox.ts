@@ -441,3 +441,10 @@ export async function trackReturnsPublic(gstin: string, fy: string): Promise<unk
   const res = await request('POST', '/gst/compliance/public/gstrs/track', { token: await platformToken(), query: { financial_year: `FY ${fy}` }, body: { gstin } });
   return res.inner ?? {};
 }
+
+/** Monthly or quarterly (QRMP) filing for a GSTIN in a financial year ("2026-27"), quarter by quarter – public data. */
+export async function returnPreference(gstin: string, fy: string): Promise<{ quarter: string; preference: string }[]> {
+  const res = await request('POST', '/gst/compliance/public/gstrs/preference', { token: await platformToken(), query: { financial_year: `FY ${fy}` }, body: { gstin } });
+  const list = (res.inner as { response?: unknown } | undefined)?.response;
+  return Array.isArray(list) ? list.filter((x): x is { quarter: string; preference: string } => !!x && typeof x === 'object') : [];
+}

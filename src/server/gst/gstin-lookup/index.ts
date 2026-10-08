@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { checkGstin, describeGstin, type GstinParts } from '@/engine';
 import { HttpError } from '../../http';
 import { describeGstnError, GstnError } from '../gst-client';
-import { sandboxConfigured, searchGstinPublic } from '../gst-client/sandbox';
+import { returnPreference, sandboxConfigured, searchGstinPublic } from '../gst-client/sandbox';
 import { toTaxpayerProfile, type TaxpayerProfile } from './profile';
 
 /**
@@ -35,6 +35,31 @@ export function splitGstins(text: string): string[] {
 
 export function checkOffline(list: string[]): GstinResult[] {
   return list.map((g) => ({ input: g, offline: describeGstin(g) }));
+}
+
+/** Current quarter of the Indian financial year ("Q1" = Apr–Jun) and the year ("2026-27"). */
+function currentQuarter(now = new Date()) {
+  const m = now.getMonth() + 1;
+  const start = m >= 4 ? now.getFullYear() : now.getFullYear() - 1;
+  return { fy: `${start}-${String((start + 1) % 100).padStart(2, '0')}`, quarter: `Q${m >= 4 ? Math.ceil((m - 3) / 3) : 4}` };
+}
+
+/** Monthly or quarterly filing now, from GSTN's return preference; undefined when GSTN does not say. */
+async function filingFrequency(gstin: string): Promise<'monthly' | 'quarterly' | undefined> {
+  const { fy, quarter } = currentQuarter();
+  try {
+    const list = await returnPreference(gstin, fy);
+    const p = (list.find((x) => x.quarter === quarter) ?? list[list.length - 1])?.preference?.toUpperCase();
+    return p === 'Q' ? 'quarterly' : p === 'M' ? 'monthly' : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Sandbox lookups for adding companies: GSTN's taxpayer record plus the filing frequency. */
+export async function lookupForCompanies(list: string[]): Promise<(GstinResult & { filingFrequency?: 'monthly' | 'quarterly' })[]> {
+  const results = await checkWithSandbox(list);
+  return Promise.all(results.map(async (r) => (r.profile ? { ...r, filingFrequency: await filingFrequency(r.input) } : r)));
 }
 
 /** Offline checks for all, then Sandbox lookups (3 at a time) for the ones that pass offline. */

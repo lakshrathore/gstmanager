@@ -54,6 +54,8 @@ table.ledger { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.ledger th { text-align: left; font-weight: 600; color: var(--ink-soft); padding: 8px 10px; border-bottom: 2px solid var(--ink); white-space: nowrap; }
 table.ledger td { padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 table.ledger tr.row-error td:first-child { box-shadow: inset 3px 0 0 var(--red-ink); }
+table.ledger tr.row-warn td:first-child { box-shadow: inset 3px 0 0 var(--amber); }
+table.ledger tr.row-calc td { background: #f6f6f3; font-weight: 600; }
 table.ledger tbody tr:hover { background: #f7faf9; }
 
 }

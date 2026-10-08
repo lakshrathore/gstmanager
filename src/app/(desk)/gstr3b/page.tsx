@@ -194,6 +194,7 @@ export default function Gstr3bPage() {
         </>
       )}
       <a className="text-[13px] text-ledger underline" href={`/api/gstr3b/excel?companyId=${companyId}&fp=${fp}`}>{draft && !dirty ? 'Download these tables as Excel' : 'Download Excel template'}</a>
+      {draft && !dirty && <a className="text-[13px] text-ledger underline" href={`/api/downloads/file?type=gstr3b&companyId=${companyId}&period=${fp}&format=json`}>Download as JSON</a>}
     </div>
   );
   const needLogin = o && o.api && !loggedIn && <Notice tone="warn">Log in to GST (right) to continue. GSTN sends the OTP; you type it here.</Notice>;

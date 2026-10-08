@@ -10,6 +10,9 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
   const links = [
     { href: '/', label: 'GSTR-1' },
     { href: '/gstr3b', label: 'GSTR-3B' },
+    { href: '/gstr9', label: 'GSTR-9' },
+    { href: '/gstr9c', label: 'GSTR-9C' },
+    { href: '/downloads', label: 'Downloads' },
     { href: '/companies', label: 'Companies' },
     { href: '/recon', label: 'Reconciliation' },
     { href: '/tools', label: 'Validators' },
@@ -17,7 +20,7 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
     { href: '/license', label: 'License' },
     ...(canReset ? [{ href: '/settings', label: 'Settings' }] : []),
   ];
-  const active = (h: string) => (h === '/' ? path === '/' || path.startsWith('/returns') : path.startsWith(h));
+  const active = (h: string) => (h === '/' ? path === '/' || path.startsWith('/returns') : path === h || path.startsWith(`${h}/`));
   return (
     <aside className="flex items-center justify-between gap-4 border-b border-rule bg-ink px-4 py-3 text-white md:sticky md:top-0 md:h-screen md:flex-col md:items-stretch md:justify-start md:border-0 md:px-4 md:py-6">
       <Link href="/" className="text-[16px] font-semibold leading-tight">GST Return<br className="hidden md:block" /> Desk</Link>

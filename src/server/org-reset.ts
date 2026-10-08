@@ -4,7 +4,7 @@ import type { Auth } from './auth';
 import { audit } from './gst/gst-audit';
 import { HttpError } from './http';
 import {
-  AuditLog, Company, GeneratedJson, GstApiSession, GstReturn, Gstr1Error, Gstr1Record, oid, PortalEvidence, PurchaseDoc, PurchaseImport, ReconDecision, UploadJob, User,
+  AnnualReturn, AuditLog, Company, GeneratedJson, GstApiSession, GstReturn, Gstr1Error, Gstr1Record, oid, PortalEvidence, PurchaseDoc, PurchaseImport, ReconDecision, UploadJob, User,
 } from './models';
 
 /**
@@ -29,6 +29,7 @@ const TARGETS: { key: string; label: string; model: { collection: Collection } }
   { key: 'purchases', label: 'Purchase documents (books, GSTR-2A, GSTR-2B)', model: PurchaseDoc },
   { key: 'purchaseImports', label: 'Purchase uploads', model: PurchaseImport },
   { key: 'reconDecisions', label: 'Reconciliation decisions', model: ReconDecision },
+  { key: 'annual', label: 'GSTR-9 and GSTR-9C', model: AnnualReturn },
   { key: 'returns', label: 'GSTR-1 returns', model: GstReturn },
   { key: 'companies', label: 'Companies', model: Company },
   { key: 'audit', label: 'Audit log entries', model: AuditLog },

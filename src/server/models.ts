@@ -298,6 +298,38 @@ const Gstr3bSchema = new Schema(
 );
 Gstr3bSchema.index({ orgId: 1, companyId: 1, fp: 1 }, { unique: true });
 
+/* Annual returns: GSTR-9 and GSTR-9C (one per company + financial year; prepared offline) */
+
+export const ANNUAL_KINDS = ['gstr9', 'gstr9c'] as const;
+export const ANNUAL_STATUSES = ['draft', 'filed'] as const;
+
+/**
+ * GSTR-9 / GSTR-9C prepared in the app (manual entry, Excel or JSON import, or auto-filled from the
+ * year's GSTR-1 / GSTR-3B / GSTR-9) and downloaded for the GST portal. Filing happens on the portal;
+ * the ARN is recorded here by the user.
+ */
+const AnnualReturnSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    gstin: { type: String, required: true },
+    kind: { type: String, enum: ANNUAL_KINDS, required: true },
+    fy: { type: String, required: true }, // "2024-25"
+    status: { type: String, enum: ANNUAL_STATUSES, default: 'draft' },
+    /** { v, lists, text } – see src/server/gst/annual/common.ts. */
+    form: Mixed,
+    formSource: { type: String, enum: ['auto', 'manual', 'excel', 'json'] },
+    formUpdatedAt: Date,
+    formUpdatedBy: String,
+    /** What the last auto-fill or import could not do – shown until the next one. */
+    notes: [String],
+    filed: { arn: String, filedOn: Date, recordedAt: Date, recordedBy: String },
+    history: [{ _id: false, at: Date, from: String, to: String, note: String, byEmail: String }],
+  },
+  { ...ts, minimize: false },
+);
+AnnualReturnSchema.index({ orgId: 1, companyId: 1, kind: 1, fy: 1 }, { unique: true });
+
 /* Purchases & ITC reconciliation (books ↔ GSTR-2A / GSTR-2B) */
 
 export const PURCHASE_SOURCES = ['books', 'gstr2a', 'gstr2b'] as const;
@@ -527,6 +559,7 @@ export const GstApiSession = model('GstApiSession', GstApiSessionSchema);
 export const GstSession = model('GstSession', GstSessionSchema);
 export const GstProfile = model('GstProfile', GstProfileSchema);
 export const Gstr3b = model('Gstr3b', Gstr3bSchema);
+export const AnnualReturn = model('AnnualReturn', AnnualReturnSchema);
 export const PurchaseDoc = model('PurchaseDoc', PurchaseDocSchema);
 export const PurchaseImport = model('PurchaseImport', PurchaseImportSchema);
 export const ReconDecision = model('ReconDecision', ReconDecisionSchema);
@@ -540,4 +573,5 @@ export const AuditLog = model('AuditLog', AuditLogSchema);
 export type CompanyDoc = InferSchemaType<typeof CompanySchema> & { _id: Types.ObjectId };
 export type GstReturnDoc = InferSchemaType<typeof GstReturnSchema> & { _id: Types.ObjectId };
 export type Gstr3bDoc = InferSchemaType<typeof Gstr3bSchema> & { _id: Types.ObjectId };
+export type AnnualReturnDoc = InferSchemaType<typeof AnnualReturnSchema> & { _id: Types.ObjectId };
 export const oid = (s: string) => (Types.ObjectId.isValid(s) ? new Types.ObjectId(s) : null);

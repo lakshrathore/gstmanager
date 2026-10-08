@@ -169,6 +169,43 @@ End-to-end test run: add the company → create the return for the period → im
 
 Implement a `GstClient` in `src/server/gst/gst-client` using only an officially supported interface, set its capability flags, register it in `CLIENTS`, and select it with `GST_INTEGRATION`. `gst-upload` calls the client's methods when its capabilities allow, and routes every result through `changeStatus()` and PortalEvidence. Import, validation, JSON generation, error mapping and audit don't change.
 
+## GSTR-9 and GSTR-9C (annual returns)
+
+**GSTR-9** and **GSTR-9C** in the sidebar, per company and financial year. Both are prepared offline: the app checks the return, and you upload and file it on the GST portal.
+
+1. **Fill**: one of these.
+   - **Fill from GSTR-1 & GSTR-3B** (GSTR-9): tables 4, 5 and 17 come from the year's GSTR-1 records; 4G and tables 6, 7 and 9 come from the GSTR-3B returns in the app. For filed 3Bs, the paid columns of table 9 come from GSTN's payment table.
+   - **Fill from GSTR-9** (GSTR-9C): fills 5Q, 7B – 7F, 9Q, 12E, 14S and the rate-wise rows of table 9.
+   - **Import Excel or JSON**: the app's Excel template (download it from the page) or GSTN's GSTR-9 JSON (the upload/save shape, Get Details, or the system-computed JSON).
+   - Type the figures in by hand.
+
+   Whatever the data can't split is listed as notes: capital goods vs. input services, rule-wise reversals, amendments.
+2. **Check**: sub-totals and differences (4N, 5N, 6J, 7J, 8D, 8K; 9C 5P/5R, 7G, 9R, 12F, 14T) recalculate as you type. Errors and warnings are listed and marked on their rows, for example:
+   - negative amounts;
+   - CGST ≠ SGST;
+   - tax that doesn't match the taxable value or rate;
+   - 6B – 6H vs. 6A;
+   - reversals above ITC;
+   - table 9 paid vs. payable, and credit used across the wrong heads;
+   - HSN digits, rate, UQC and duplicate rows;
+   - 9C figures that differ from GSTR-9;
+   - un-reconciled differences without reasons.
+3. **Download**:
+   - GSTR-9 JSON is GSTN's format (Save GSTR-9 / offline upload). It leaves out sub-totals and the columns the portal fills (6A, 8A, table 9 paid), and it is refused while the return has errors.
+   - GSTN accepts GSTR-9C only as JSON made by its offline tool. The app gives an Excel laid out like the form, for keying into the tool, plus a JSON backup that this app can import again.
+4. **Record the filing**: the ARN and date (owner/admin). This locks the return; **Reopen** unlocks it, with a reason.
+
+## Download center
+
+**Downloads** in the sidebar.
+
+- **Filters**: return types (GSTR-1, GSTR-3B, GSTR-9, GSTR-9C), companies, a financial year or a custom month range, and status (all / filed / not filed).
+- **Formats**:
+  - GSTR-1: the generated JSON, or an Excel of the records.
+  - GSTR-3B: GSTN's JSON, or the Excel tables.
+  - GSTR-9 / GSTR-9C: as above.
+- **Each return** downloads on its own, or **Download all as ZIP** puts everything in `GSTIN/return/` folders. The ZIP has a README listing anything not included and why (e.g. JSON not generated, validation errors). Every download is audited.
+
 ## Validators
 
 Open **Validators** in the sidebar (any role can use it).

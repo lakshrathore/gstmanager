@@ -37,6 +37,7 @@ export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => vo
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={generate} busy={busy} disabled={errors > 0 || !d.return.summary?.total}>{p ? 'Regenerate JSON' : 'Generate JSON'}</Button>
           {p && !d.return.jsonStale && <a className="rounded-md border border-rule bg-white px-3.5 py-2 text-[13.5px] font-medium hover:border-ink-soft" href={`/api/returns/${d.return._id}/json?download=1`}>Download GSTR1_{d.company.gstin}_{d.return.fp}.json</a>}
+          {!!d.return.summary?.total && <a className="text-[13px] text-ledger underline" href={`/api/downloads/file?type=gstr1&companyId=${d.company._id}&period=${d.return.fp}&format=xlsx`}>Download records as Excel</a>}
         </div>
         {err && <div className="mt-4"><Notice tone="error">{err.msg}{Array.isArray(err.details) && <ul className="num mt-2 text-[12.5px]">{(err.details as { path: string; message: string }[]).slice(0, 20).map((x, i) => <li key={i}>{x.path}: {x.message}</li>)}</ul>}</Notice></div>}
       </Panel>

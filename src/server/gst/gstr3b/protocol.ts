@@ -458,7 +458,7 @@ const norm = (v: unknown) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g,
 const fieldName = (k: keyof Amt) => (k === 'txval' ? 'taxable value' : HEAD_LABEL[k]);
 
 /** Amount from a cell: numbers, "1,23,456.78", "(100)" for negatives; blank is 0; anything else null. */
-function amount(v: unknown): number | null {
+export function amount(v: unknown): number | null {
   if (v == null || v === '') return 0;
   if (typeof v === 'number') return r2(v);
   const s = String(v).trim().replace(/[₹,\s]/g, '');

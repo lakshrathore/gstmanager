@@ -17,7 +17,7 @@ const COLS: (keyof Amt)[] = ['txval', 'iamt', 'camt', 'samt', 'csamt'];
 const COL_LABEL: Record<keyof Amt, string> = { txval: 'Taxable value', ...HEAD_LABEL };
 
 /** Number cell that keeps what is being typed ("12.") and reports a rounded number. */
-function Num({ value, onChange, disabled }: { value: number; onChange?: (n: number) => void; disabled?: boolean }) {
+export function Num({ value, onChange, disabled }: { value: number; onChange?: (n: number) => void; disabled?: boolean }) {
   const [text, setText] = useState(value ? String(value) : '');
   // Show the typed text while it still means this value; otherwise the value changed from outside.
   const shown = r2(text) === value ? text : value ? String(value) : '';

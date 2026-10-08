@@ -1,10 +1,11 @@
 import 'server-only';
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 import type { Auth } from './auth';
 import { audit } from './gst/gst-audit';
 import { HttpError } from './http';
 import {
-  AnnualReturn, AuditLog, Company, GeneratedJson, GstApiSession, GstReturn, Gstr1Error, Gstr1Record, oid, PortalEvidence, PurchaseDoc, PurchaseImport, ReconDecision, UploadJob, User,
+  AnnualReturn, AssistantChat, AuditLog, ClientDoc, Company, DocRecord, GeneratedJson, GstApiSession, GstReturn, Gstr1Error, Gstr1Record, oid, PortalEvidence, PurchaseDoc, PurchaseImport, ReconDecision, UploadJob, User,
 } from './models';
 
 /**
@@ -20,6 +21,8 @@ export const RESET_PHRASE = 'DELETE ALL DATA';
 
 /** Children first, so a failed run never leaves records pointing at a deleted parent. Safe to re-run. */
 const TARGETS: { key: string; label: string; model: { collection: Collection } }[] = [
+  { key: 'chats', label: 'Assistant conversations', model: AssistantChat },
+  { key: 'docRecords', label: 'Records read from client documents', model: DocRecord },
   { key: 'records', label: 'Invoice / table records', model: Gstr1Record },
   { key: 'errors', label: 'Validation and portal errors', model: Gstr1Error },
   { key: 'json', label: 'Generated JSON files', model: GeneratedJson },
@@ -30,6 +33,7 @@ const TARGETS: { key: string; label: string; model: { collection: Collection } }
   { key: 'purchaseImports', label: 'Purchase uploads', model: PurchaseImport },
   { key: 'reconDecisions', label: 'Reconciliation decisions', model: ReconDecision },
   { key: 'annual', label: 'GSTR-9 and GSTR-9C', model: AnnualReturn },
+  { key: 'clientDocs', label: 'Uploaded client documents', model: ClientDoc },
   { key: 'returns', label: 'GSTR-1 returns', model: GstReturn },
   { key: 'companies', label: 'Companies', model: Company },
   { key: 'audit', label: 'Audit log entries', model: AuditLog },
@@ -65,6 +69,14 @@ export async function resetOrganisation(auth: Auth, input: { confirm: string; pa
     const res = await t.model.collection.deleteMany({ orgId });
     deleted.push({ key: t.key, label: t.label, count: res.deletedCount ?? 0 });
   }
+  // Uploaded files (GridFS): the metadata carries the organisation.
+  const files = mongoose.connection.db!.collection('clientfiles.files');
+  const ids = (await files.find({ 'metadata.orgId': auth.orgId }).project({ _id: 1 }).toArray()).map((f) => f._id);
+  if (ids.length) {
+    await mongoose.connection.db!.collection('clientfiles.chunks').deleteMany({ files_id: { $in: ids } });
+    await files.deleteMany({ _id: { $in: ids } });
+  }
+  deleted.push({ key: 'files', label: 'Stored files', count: ids.length });
   if (input.removeTeam) {
     const res = await User.deleteMany({ orgId, _id: { $ne: me._id } });
     deleted.push({ key: 'users', label: 'Other team members', count: res.deletedCount ?? 0 });

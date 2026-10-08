@@ -12,6 +12,49 @@ interface Info {
   usage: Limits;
   limitLabels: Record<string, string>;
   featureLabels: Record<string, string>;
+  ai: {
+    enabled: boolean; budgetInr: number; month: string; spentInr: number;
+    months: { month: string; documents: { calls: number; costInr: number }; assistant: { calls: number; costInr: number }; tokens: { input: number; output: number } }[];
+  };
+}
+
+const rupee = (n: number) => `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const monthName = (m: string) => new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1, 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+
+/** Claude API spend this month against the plan's allowance, and the last months by use. */
+function AiUsagePanel({ ai }: { ai: Info['ai'] }) {
+  const pct = ai.budgetInr ? Math.min(100, Math.round((ai.spentInr / ai.budgetInr) * 100)) : 0;
+  return (
+    <Panel title="Document AI usage">
+      {!ai.enabled ? <p className="text-ink-soft">Your plan does not include Document AI (reading PDFs, scans and photos, and the Ask-the-documents assistant).</p> : (
+        <div className="space-y-4">
+          <div>
+            <div className="flex justify-between text-[13px]"><span>{monthName(ai.month)}</span><span className="num">{rupee(ai.spentInr)} / {ai.budgetInr ? rupee(ai.budgetInr) : 'no limit'}</span></div>
+            {ai.budgetInr > 0 && <div className="mt-1 h-2 rounded bg-black/5"><div className={`h-2 rounded ${pct >= 100 ? 'bg-red-ink' : pct >= 80 ? 'bg-amber' : 'bg-ledger'}`} style={{ width: `${pct}%` }} /></div>}
+            {ai.budgetInr > 0 && pct >= 100 && <p className="mt-1 text-[12.5px] text-red-ink">The allowance is used up – documents that need AI wait until it renews on the 1st.</p>}
+          </div>
+          {ai.months.length > 0 && (
+            <div className="-mx-5 overflow-x-auto">
+              <table className="ledger">
+                <thead><tr><th>Month</th><th className="text-right">Documents read</th><th className="text-right">Cost</th><th className="text-right">Assistant answers</th><th className="text-right">Cost</th><th className="text-right">Total</th></tr></thead>
+                <tbody>
+                  {ai.months.map((m) => (
+                    <tr key={m.month}>
+                      <td>{monthName(m.month)}</td>
+                      <td className="num text-right">{m.documents.calls}</td><td className="num text-right">{rupee(m.documents.costInr)}</td>
+                      <td className="num text-right">{m.assistant.calls}</td><td className="num text-right">{rupee(m.assistant.costInr)}</td>
+                      <td className="num text-right font-semibold">{rupee(m.documents.costInr + m.assistant.costInr)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p className="text-[12px] text-ink-soft">Worked out from the tokens of each Claude API call at list prices. “Assistant answers” counts API calls – one question can take several.</p>
+        </div>
+      )}
+    </Panel>
+  );
 }
 
 export default function LicensePage() {
@@ -80,6 +123,7 @@ export default function LicensePage() {
           )}
         </Panel>
       )}
+      {info?.ai && <AiUsagePanel ai={info.ai} />}
       {info && <PayByUpi canPay={canManage} limitLabels={info.limitLabels} featureLabels={info.featureLabels} />}
       <Panel title="Have a license key?">
         {canManage ? (

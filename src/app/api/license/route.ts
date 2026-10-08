@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { audit } from '@/server/gst/gst-audit';
 import { api } from '@/server/http';
+import { aiUsageSummary } from '@/server/ai-usage';
 import { activateKey, FEATURES, licenseState, LIMITS, usage } from '@/server/license';
 
 /** The workspace's license, plan limits and current usage. */
@@ -9,6 +10,7 @@ export const GET = api('return:view', async (_req, { auth }) => ({
   usage: await usage(auth.orgId),
   limitLabels: LIMITS,
   featureLabels: FEATURES,
+  ai: await aiUsageSummary(auth.orgId),
 }));
 
 const Body = z.object({ key: z.string().min(10).max(40) });

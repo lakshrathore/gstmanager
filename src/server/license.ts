@@ -16,6 +16,7 @@ export const FEATURES: Record<FeatureKey, string> = {
   marketplaceImport: 'Import Amazon / Flipkart / Meesho sales reports',
   manualEntry: 'Add and edit return entries manually',
   reconciliation: 'Purchase reconciliation with GSTR-2A / GSTR-2B',
+  documentAI: 'Document AI – read PDFs, scans and photos, and the Ask-the-documents assistant',
 };
 
 export const LIMITS = {
@@ -34,7 +35,7 @@ export interface LicenseState {
   expiresAt: Date | null;
   daysLeft: number | null;
   /** limits = package limits + extras (0 stays unlimited); baseLimits = the package alone. */
-  plan: { id: string; name: string; limits: Record<LimitKey, number>; baseLimits: Record<LimitKey, number>; extras: Record<LimitKey, number>; features: FeatureKey[] } | null;
+  plan: { id: string; name: string; limits: Record<LimitKey, number>; baseLimits: Record<LimitKey, number>; extras: Record<LimitKey, number>; features: FeatureKey[]; aiBudgetInr: number } | null;
 }
 
 const LIMIT_KEYS = ['companies', 'users', 'returnsPerMonth'] as const;
@@ -68,7 +69,7 @@ export async function licenseState(orgId: string | Types.ObjectId): Promise<Lice
           const base = Object.fromEntries(LIMIT_KEYS.map((k) => [k, pkg.limits?.[k] ?? 0])) as Record<LimitKey, number>;
           const extras = Object.fromEntries(LIMIT_KEYS.map((k) => [k, lic.extras?.[k] ?? 0])) as Record<LimitKey, number>;
           const limits = Object.fromEntries(LIMIT_KEYS.map((k) => [k, base[k] ? base[k] + extras[k] : 0])) as Record<LimitKey, number>;
-          return { id: String(pkg._id), name: pkg.name, limits, baseLimits: base, extras, features: (pkg.features ?? []) as FeatureKey[] };
+          return { id: String(pkg._id), name: pkg.name, limits, baseLimits: base, extras, features: (pkg.features ?? []) as FeatureKey[], aiBudgetInr: pkg.aiBudgetInr ?? 0 };
         })()
       : null,
   };

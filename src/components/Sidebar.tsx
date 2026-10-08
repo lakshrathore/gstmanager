@@ -8,6 +8,10 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
   const path = usePathname();
   const router = useRouter();
   const links = [
+    { href: '/firm', label: 'Firm dashboard' },
+    { href: '/documents', label: 'Client documents' },
+    { href: '/search', label: 'Search' },
+    { href: '/assistant', label: 'Ask the documents' },
     { href: '/', label: 'GSTR-1' },
     { href: '/gstr3b', label: 'GSTR-3B' },
     { href: '/gstr9', label: 'GSTR-9' },

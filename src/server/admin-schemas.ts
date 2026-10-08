@@ -14,6 +14,8 @@ export const PackageBody = z.object({
     returnsPerMonth: z.coerce.number().int().min(0).max(1_000_000),
   }),
   features: z.array(z.enum(FEATURE_KEYS)).default([]),
+  /** Document AI spend allowed per month in ₹ (0 = unlimited). */
+  aiBudgetInr: z.coerce.number().min(0).max(10_000_000).default(0),
   isTrial: z.boolean().default(false),
   active: z.boolean().default(true),
 });

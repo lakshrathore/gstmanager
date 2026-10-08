@@ -407,6 +407,130 @@ const ReconDecisionSchema = new Schema(
 );
 ReconDecisionSchema.index({ orgId: 1, companyId: 1, fp: 1, against: 1 });
 
+/* Client documents (upload → understand → extract → check) */
+
+export const DOC_STATUSES = ['queued', 'processing', 'processed', 'needs_review', 'failed', 'duplicate'] as const;
+
+/**
+ * An uploaded client document. The file itself is in GridFS (bucket "clientfiles"); what it is, whose
+ * it is and which period it belongs to are detected, by rules for structured files or by AI.
+ */
+const ClientDocSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    /** Null until the client is identified (upload with "detect client"). */
+    companyId: { type: ObjectId, default: null },
+    fileId: { type: ObjectId, required: true },
+    fileName: { type: String, required: true },
+    contentType: String,
+    sizeBytes: Number,
+    sha256: { type: String, required: true },
+    batchId: String,
+    status: { type: String, enum: DOC_STATUSES, default: 'queued' },
+    /** What the document is (see src/engine/docs/types.ts DOC_KINDS). */
+    kind: String,
+    kindReason: String,
+    /** "rules" (structured file) or "ai". */
+    method: String,
+    confidence: Number,
+    /** Main return period of the contents (MMYYYY) and its financial year. */
+    fp: String,
+    fy: String,
+    gstins: [String],
+    notes: [String],
+    error: String,
+    duplicateOf: ObjectId,
+    /** Set by the CA when the detected type is wrong (e.g. a sales register taken as purchases). */
+    kindOverride: String,
+    /** What was read from the file (before client/period assignment) – reused on reprocessing so AI is not paid for twice. */
+    extraction: { type: Mixed, select: false },
+    counts: { records: Number, review: Number, errors: Number },
+    ai: { model: String, inputTokens: Number, outputTokens: Number, costInr: Number },
+    attempts: { type: Number, default: 0 },
+    startedAt: Date,
+    processedAt: Date,
+    uploadedBy: String,
+  },
+  ts,
+);
+ClientDocSchema.index({ orgId: 1, companyId: 1, fy: 1, fp: 1 });
+ClientDocSchema.index({ orgId: 1, status: 1 });
+ClientDocSchema.index({ orgId: 1, sha256: 1 });
+
+/** One invoice or bank transaction extracted from a ClientDoc. */
+const DocRecordSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    docId: { type: ObjectId, required: true },
+    kind: { type: String, enum: ['invoice', 'bank'], required: true },
+    /** Invoices: document | register | gstr1 | gstr2a | gstr2b. */
+    source: String,
+    direction: { type: String, enum: ['sales', 'purchase', null], default: null },
+    fp: String,
+    fy: String,
+    data: { type: Mixed, required: true },
+    /** Data as first extracted, kept when the CA corrects it. */
+    original: Mixed,
+    loc: { page: Number, sheet: String, row: Number },
+    uncertain: [String],
+    flags: [{ _id: false, code: String, severity: String, field: String, message: String, relatedId: String }],
+    review: { type: String, enum: ['ok', 'review', 'approved', 'rejected'], default: 'ok' },
+    reviewedBy: String,
+    reviewedAt: Date,
+    /** Duplicate detection and search. */
+    dupKey: String,
+    nearKey: String,
+    party: String,
+    docNo: String,
+    amount: Number,
+    text: String,
+  },
+  { ...ts, minimize: false },
+);
+DocRecordSchema.index({ orgId: 1, companyId: 1, fp: 1, kind: 1 });
+DocRecordSchema.index({ orgId: 1, docId: 1 });
+DocRecordSchema.index({ orgId: 1, companyId: 1, dupKey: 1 });
+DocRecordSchema.index({ orgId: 1, companyId: 1, nearKey: 1 });
+
+/* AI assistant conversations (one client each) */
+
+/**
+ * A conversation with the assistant about one client's data. `messages` is the exact Messages API
+ * history (thinking and tool blocks unchanged – the next turn must replay it as is); `turns` is what
+ * the screen shows.
+ */
+const AssistantChatSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    userId: { type: ObjectId, required: true },
+    companyId: { type: ObjectId, required: true },
+    title: String,
+    messages: { type: [Mixed], select: false },
+    turns: [{ _id: false, role: String, text: String, tools: Mixed, at: Date, error: Boolean }],
+    usage: { inputTokens: { type: Number, default: 0 }, outputTokens: { type: Number, default: 0 }, cacheReadTokens: { type: Number, default: 0 } },
+  },
+  { ...ts, minimize: false },
+);
+AssistantChatSchema.index({ orgId: 1, userId: 1, companyId: 1, updatedAt: -1 });
+
+/** One Claude API call made for an organisation – what it cost, for the monthly AI allowance. */
+const AiUsageSchema = new Schema(
+  {
+    orgId: { type: ObjectId, required: true },
+    /** "YYYY-MM" (calendar month, India time). */
+    month: { type: String, required: true },
+    kind: { type: String, enum: ['extract', 'assistant'], required: true },
+    model: String,
+    inputTokens: Number, outputTokens: Number, cacheReadTokens: Number, cacheWriteTokens: Number,
+    costInr: { type: Number, required: true },
+    refId: String,
+    byEmail: String,
+  },
+  ts,
+);
+AiUsageSchema.index({ orgId: 1, month: 1 });
+
 /* Platform: super admin, packages and licenses (not scoped to an org) */
 
 /** Software owner. Separate from org users; signs in at /admin. */
@@ -421,7 +545,7 @@ const SuperAdminSchema = new Schema(
   ts,
 );
 
-export const FEATURE_KEYS = ['validators', 'gstApi', 'marketplaceImport', 'manualEntry', 'reconciliation'] as const;
+export const FEATURE_KEYS = ['validators', 'gstApi', 'marketplaceImport', 'manualEntry', 'reconciliation', 'documentAI'] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
 /** A sellable plan. 0 in a limit means unlimited. */
@@ -437,6 +561,8 @@ const PackageSchema = new Schema(
       returnsPerMonth: { type: Number, default: 0 },
     },
     features: [{ type: String, enum: FEATURE_KEYS }],
+    /** Document AI: Claude API spend allowed per calendar month, in ₹ (0 = unlimited). */
+    aiBudgetInr: { type: Number, default: 0 },
     /** Given automatically to new sign-ups. */
     isTrial: { type: Boolean, default: false },
     /** Archived packages keep working for existing licenses but cannot be issued. */
@@ -560,6 +686,10 @@ export const GstSession = model('GstSession', GstSessionSchema);
 export const GstProfile = model('GstProfile', GstProfileSchema);
 export const Gstr3b = model('Gstr3b', Gstr3bSchema);
 export const AnnualReturn = model('AnnualReturn', AnnualReturnSchema);
+export const ClientDoc = model('ClientDoc', ClientDocSchema);
+export const DocRecord = model('DocRecord', DocRecordSchema);
+export const AssistantChat = model('AssistantChat', AssistantChatSchema);
+export const AiUsage = model('AiUsage', AiUsageSchema);
 export const PurchaseDoc = model('PurchaseDoc', PurchaseDocSchema);
 export const PurchaseImport = model('PurchaseImport', PurchaseImportSchema);
 export const ReconDecision = model('ReconDecision', ReconDecisionSchema);
@@ -573,5 +703,7 @@ export const AuditLog = model('AuditLog', AuditLogSchema);
 export type CompanyDoc = InferSchemaType<typeof CompanySchema> & { _id: Types.ObjectId };
 export type GstReturnDoc = InferSchemaType<typeof GstReturnSchema> & { _id: Types.ObjectId };
 export type Gstr3bDoc = InferSchemaType<typeof Gstr3bSchema> & { _id: Types.ObjectId };
+export type ClientDocDoc = InferSchemaType<typeof ClientDocSchema> & { _id: Types.ObjectId };
+export type DocRecordDoc = InferSchemaType<typeof DocRecordSchema> & { _id: Types.ObjectId };
 export type AnnualReturnDoc = InferSchemaType<typeof AnnualReturnSchema> & { _id: Types.ObjectId };
 export const oid = (s: string) => (Types.ObjectId.isValid(s) ? new Types.ObjectId(s) : null);

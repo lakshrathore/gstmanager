@@ -169,6 +169,72 @@ End-to-end test run: add the company → create the return for the period → im
 
 Implement a `GstClient` in `src/server/gst/gst-client` using only an officially supported interface, set its capability flags, register it in `CLIENTS`, and select it with `GST_INTEGRATION`. `gst-upload` calls the client's methods when its capabilities allow, and routes every result through `changeStatus()` and PortalEvidence. Import, validation, JSON generation, error mapping and audit don't change.
 
+## Client documents (upload → understand → check → reconcile)
+
+**Client documents** in the sidebar. Each client's documents are organised by financial year and month.
+
+1. **Upload** any number of files: PDF (text or scanned), JPG/PNG, Excel, CSV, JSON or Word. Pick the client, or let the app detect it from the GSTINs in each document.
+2. **Understand and extract.**
+   - Structured files are recognised by rules, at no cost: GSTR-1/2A/2B/3B (GSTN JSON and portal Excel), sales and purchase registers (Tally, Busy, Zoho or your own columns) and bank statements.
+   - PDFs, scans, photos and Word files are read by Claude (`claude-opus-5-5`; needs `ANTHROPIC_API_KEY`). Claude identifies the type and period and extracts every invoice (with items) or bank transaction. Values it cannot read are left blank and marked for review, never guessed.
+   - Files run in the background, 3 at a time (`DOC_AI_CONCURRENCY`). Re-uploading the same file is detected and it is not read again.
+3. **Check.** Every record is checked for:
+   - invalid GSTINs (check digit) and missing invoice number, date or GSTIN;
+   - tax against rate, CGST = SGST, IGST vs CGST/SGST against the place of supply, and items, total and invoice value;
+   - future dates and large cash deposits;
+   - duplicates against everything already uploaded for the client (same party, type and number, or same party, date and amount), with the reason;
+   - bank balances that don't follow from the previous line.
+4. **Review.** Records with problems, or with values the AI was unsure of, wait in **Review**. Each one opens next to the original document at the right page, where you can correct it, approve it or reject it. The first reading is kept.
+5. **Reconcile and summarise.**
+   - **Purchase vs GSTR-2B:** matched, mismatched (by field), probable matches, missing in 2B, and missing in the books, with the ITC difference and the invoices behind it. It uses the purchase register, or the purchase invoices when there is no register.
+   - **Overview:** sales and purchases as per the books and as per GSTN, then only the exceptions (✓ matched / ⚠ problems) and automatic findings: ITC difference, month-on-month change, supplier concentration, cash deposits, and books vs GSTR-1.
+6. **Search and export.**
+   - Search invoices and transactions by number, GSTIN, party, HSN or narration. Filter by side, source, issue type, review state and amount; bank transactions also by mode (UPI, NEFT, cash…).
+   - Export the filtered list, or the full Excel report: summary, exceptions, sales, purchases, GSTR-2B, reconciliation, supplier- and customer-wise totals, bank, duplicates and errors.
+
+**Bank ↔ books.** Each receipt is matched to a sales invoice and each payment to a purchase invoice:
+- **Rules:** same amount (±₹1), dated 30 days before to 180 days after the invoice, preferring the party named in the narration. Several invoices of one party paid together are matched as a group.
+- **Bank tab:** shows which invoice each line pays, or that none matches; it can filter to "No matching invoice".
+- **Flagged:** unusual amounts (over 10× the usual, or big round figures) and cash deposits of ₹2 lakh or more.
+
+**Reports tab.** Each report shows on screen (rows open their record) and downloads as Excel:
+- **GST:** sales, purchases, GST (output tax vs ITC by head), ITC (books vs GSTR-2B), Purchase vs GSTR-2B, HSN-wise sales.
+- **Parties:** invoices, suppliers, customers.
+- **Bank:** summary by month and mode, transactions without invoices, unusual transactions.
+- **Checks:** exceptions, duplicates, errors, missing documents (month grid), missing sales invoice numbers (gaps in a series).
+
+**Search** (sidebar) works across every client. Queries can be in English, Hindi or Hinglish, for example `INV-1023`, a GSTIN, `₹50,000 से ज्यादा के invoices`, `September 2026 की purchases`, `Rao Industries की सारी invoices`, `cash deposits above 2 lakh`, `UPI receipts`.
+- The query is read by rules, not AI. The page shows how it was understood, for example *Purchases · September 2026 · ₹50,000 or more*.
+- Results link straight to the record next to its document.
+
+**Ask the documents** (sidebar) is a chat about one client, in Hindi, Hinglish or English, for example:
+- “September 2026 ki total sales kitni hai?”
+- “GSTR-2B aur purchase register mein mismatch batao”
+- “₹50,000 se zyada ke purchase invoices dikhao”
+- “Is month ke unusual transactions batao”
+
+How it works:
+- Claude (`claude-opus-5-5`, `ASSISTANT_EFFORT` default medium) answers only through read-only tools over the client's stored records: period summary, reports, record search, Purchase vs GSTR-2B, documents.
+- It is told never to state a figure that no tool returned, and to say what to upload when data is missing. Each answer lists what it looked at.
+- It cannot change, approve or file anything.
+- Conversations are kept per user and client, with the exact model history (thinking and tool blocks replayed unchanged on the next question). Token usage is recorded per conversation and in the audit log.
+
+**Firm dashboard** (sidebar) shows every client × month of a financial year:
+- **Colours:** green = fine, amber = records to review, ITC difference or GSTR-2B missing, red = errors, grey = nothing uploaded.
+- **Columns:** per-client totals of records to review, errors, ITC difference and failed or unchecked files.
+- Clients that need attention come first, and a click opens that month.
+
+**Recent uploads** under the uploader show how far each batch has got, e.g. “125 files – 121 processed · 3 needs review · 1 duplicate”, with a link to the files.
+
+**Document AI licensing and cost control:**
+- Reading PDFs, scans, photos and Word files, and the assistant, need the **Document AI** feature in the package (super admin → Packages). Each package has an optional **AI allowance per month (₹)**.
+- Every Claude API call is priced from its tokens at list prices (`USD_INR`, default 85) and recorded (`aiusages`).
+- When the month's allowance is used up, further AI calls are refused until the 1st. Documents that need AI wait as “failed” and can be read again later.
+- License → **Document AI usage** shows the month's spend against the allowance and the last months by documents and assistant.
+- The check runs before each document and each question, so one long answer can go slightly over the allowance.
+
+Files are stored in MongoDB GridFS (bucket `clientfiles`). "Start fresh" in Settings deletes them with the rest of the organisation's data.
+
 ## GSTR-9 and GSTR-9C (annual returns)
 
 **GSTR-9** and **GSTR-9C** in the sidebar, per company and financial year. Both are prepared offline: the app checks the return, and you upload and file it on the GST portal.

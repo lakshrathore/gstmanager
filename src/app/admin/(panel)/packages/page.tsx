@@ -7,11 +7,11 @@ import { call } from '@/lib/client';
 type Limits = { companies: number; users: number; returnsPerMonth: number };
 interface Pkg {
   _id: string; name: string; description?: string; priceInr: number; durationDays: number; limits: Limits;
-  features: string[]; isTrial: boolean; active: boolean; licenses: number; activeLicenses: number;
+  features: string[]; aiBudgetInr?: number; isTrial: boolean; active: boolean; licenses: number; activeLicenses: number;
 }
 
 const BLANK: Omit<Pkg, '_id' | 'licenses' | 'activeLicenses'> = {
-  name: '', description: '', priceInr: 0, durationDays: 365, limits: { companies: 5, users: 3, returnsPerMonth: 0 }, features: ['validators'], isTrial: false, active: true,
+  name: '', description: '', priceInr: 0, durationDays: 365, limits: { companies: 5, users: 3, returnsPerMonth: 0 }, features: ['validators'], aiBudgetInr: 0, isTrial: false, active: true,
 };
 
 export default function PackagesPage() {
@@ -38,7 +38,7 @@ export default function PackagesPage() {
     const body = {
       name: f.get('name'), description: f.get('description'), priceInr: f.get('priceInr'), durationDays: f.get('durationDays'),
       limits: { companies: f.get('companies'), users: f.get('users'), returnsPerMonth: f.get('returnsPerMonth') },
-      features: f.getAll('features'), isTrial: f.get('isTrial') === 'on', active: f.get('active') === 'on',
+      features: f.getAll('features'), aiBudgetInr: f.get('aiBudgetInr') || 0, isTrial: f.get('isTrial') === 'on', active: f.get('active') === 'on',
     };
     setBusy(true);
     setErr(null);
@@ -70,6 +70,8 @@ export default function PackagesPage() {
               <label key={k}>{limitLabels[k] ?? k}<input name={k} type="number" min={0} required defaultValue={current.limits[k]} /></label>
             ))}
             <p className="self-end pb-2 text-[12.5px] text-ink-soft">0 = unlimited</p>
+            <label>Document AI per month (₹)<input name="aiBudgetInr" type="number" min={0} step="1" defaultValue={current.aiBudgetInr ?? 0} /></label>
+            <p className="self-end pb-2 text-[12.5px] text-ink-soft sm:col-span-3">Claude API spend allowed per calendar month when “Document AI” is ticked below (0 = no limit). Calls are refused once it is used up.</p>
             <fieldset className="sm:col-span-2">
               <legend className="mb-1 text-[12.5px] text-ink-soft">Features</legend>
               {Object.entries(featureLabels).map(([k, label]) => (
@@ -109,7 +111,7 @@ export default function PackagesPage() {
             {p.description && <p className="mt-1 text-ink-soft">{p.description}</p>}
             <ul className="mt-3 space-y-0.5 text-[13px]">
               {(['companies', 'users', 'returnsPerMonth'] as const).map((k) => <li key={k}>{limitLabels[k]}: <b className="num">{p.limits[k] || 'Unlimited'}</b></li>)}
-              {p.features.map((f) => <li key={f}>✓ {featureLabels[f] ?? f}</li>)}
+              {p.features.map((f) => <li key={f}>✓ {featureLabels[f] ?? f}{f === 'documentAI' ? ` (${p.aiBudgetInr ? `₹${p.aiBudgetInr.toLocaleString('en-IN')}/month` : 'no monthly limit'})` : ''}</li>)}
             </ul>
             <p className="mt-3 text-[12.5px] text-ink-soft">{p.activeLicenses} active · {p.licenses} keys issued</p>
             <div className="mt-3 flex flex-wrap gap-2">

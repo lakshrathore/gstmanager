@@ -373,6 +373,14 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     const rt = ls[0].rate;
     const txval = round2(inter + intra);
     if (txval === 0 && qty === 0) continue;
+    if (section === 'hsn_b2c' && (txval < 0 || qty < 0)) {
+      // Returns of earlier months' sales exceed this month's sales of the item. Table 12 cannot be
+      // negative, and GSTN does not tally the B2C tab with Table 7, so the HSN is left out here.
+      issue('warning', 'hsn_b2c', 'txval', `HSN ${hsn || '(blank)'} (${uqc}, ${rt ?? '?'}%): returns exceed this month’s sales (net ${money(txval)}, qty ${round2(qty)}) – left out of the HSN summary (B2C)`, {
+        value: txval, suggestion: 'Table 12 cannot be negative. The returns still reduce B2C Small (Table 7); GSTN does not match the B2C HSN tab against it.',
+      });
+      continue;
+    }
     const ti = rt == null ? 0 : round2((inter * rt) / 100);
     const half = rt == null ? 0 : round2((intra * rt) / 200);
     const data: HsnData = { hsn, desc: ls.find((l) => l.description)?.description?.slice(0, 30), uqc, qty: round2(qty), rt, txval, iamt: ti, camt: half, samt: half, csamt: round2(cess) };

@@ -250,8 +250,12 @@ describe('generic sales register and merging sources', () => {
       row(5, 'H D B P Hospital', '127/26-27', '05-06-2025', 'Maharashtra', R_MH, 'PROXONE-1GM', 12, '3004', 300, 'Nos', 0, 22.5, 6750, 810, 0),
       row(6, 'H D B P Hospital', '127/26-27', '05-06-2025', 'Maharashtra', R_MH, 'Pinset-40', 5, '3004', 350, 'Nos', 0, 12.5, 4375, 218.75, 0),
     ] };
+    // The report's total row at the bottom is not a sale.
+    t.rows.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', 2343, '', '', '', '', 123555, 0, 0, 0, 123555, 5546.25, 62.5, 62.5, 5671.25, 129226.25, 0, 0, 0]);
     const r = readMarketplaceTables([t], 'sale-report.xlsx', 'auto', profile.allowedRates);
     expect(r.marketplace).toBe('generic');
+    expect(r.lines.filter((l) => l.kind === 'skip').map((l) => l.skipReason)).toEqual(['Total or summary row']);
+    r.lines = r.lines.filter((l) => l.kind !== 'skip');
     // "GST Rate" (5/12) is the rate – not "Rate" (the selling price).
     expect(r.lines.map((l) => l.rate)).toEqual([5, 5, 5, 5, 12, 5]);
     expect(r.lines[1]).toMatchObject({ buyerName: 'Divine Healthcare', uqc: 'BOX', qty: 5, pos: '27' });
@@ -289,6 +293,12 @@ describe('generic sales register and merging sources', () => {
     expect(r2.lines.filter((l) => l.kind === 'return').map((l) => l.noteNo)).toEqual(['SR-9', 'SR-10', 'SR-11']);
     const out2 = buildMarketplaceRecords(r2.lines, opts('generic'));
     expect(of(out2.records, 'cdnur')).toHaveLength(0);
+    // A return of an item not sold this month: no negative HSN row, a warning instead.
+    const only: SheetTable = { name: 'Sale Return Report', rows: [head, row(1, 'X', 'SR-12', '09-06-2025', 'Karnataka', '', 'Old item', 5, '30049011', 21, 'NOS', 0, 469.84, 9866.65, 0, 246.67)] };
+    const out3 = buildMarketplaceRecords([...r.lines, ...readMarketplaceTables([only], 'r.xlsx', 'auto', profile.allowedRates).lines], opts('generic'));
+    expect(of(out3.records, 'hsn_b2c').some((x) => (x.data as { hsn: string }).hsn === '30049011')).toBe(false);
+    expect(out3.issues.some((i) => i.section === 'hsn_b2c' && /30049011.*returns exceed/.test(i.message))).toBe(true);
+    expect(validateReturn(out3.records, ctx).issues.filter((i) => i.severity === 'error' && i.section.startsWith('hsn'))).toEqual([]);
     expect(of(out2.records, 'b2cs').map((x) => x.data)).toEqual(expect.arrayContaining([
       expect.objectContaining({ pos: '29', txval: 2250 }), expect.objectContaining({ pos: '27', txval: 4370 })]));
     expect(of(out2.records, 'cdnr').map((x) => x.data)).toEqual([expect.objectContaining({ ctin: R_MH, ntNum: 'SR-11', ntty: 'C' })]);

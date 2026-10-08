@@ -258,6 +258,11 @@ const GENERIC: FormatDef = {
     sellerGstin: ['seller gstin', 'supplier gstin', 'our gstin'],
   },
   toLine(get, ctx) {
+    // Total / summary rows at the end of a report: no bill, item, HSN or state – or labelled "Total".
+    const label = `${str(get('invoiceNo'))} ${str(get('buyerName'))}`.trim();
+    if (/^(grand\s*)?(sub\s*)?total\b/i.test(label) || (!str(get('invoiceNo')) && !str(get('hsn')) && !str(get('description')) && !stateCode(get('state')))) {
+      return line({ file: ctx.file, row: ctx.row, kind: 'skip', skipReason: 'Total or summary row', pos: '', hsn: '', qty: 0, rate: null, taxable: 0 });
+    }
     const type = str(get('type')).toLowerCase();
     // A separate sale-return / credit-note report (same columns, positive amounts) is recognised by its
     // sheet or file name, or by a filled credit-note number.

@@ -299,6 +299,25 @@ describe('generic sales register and merging sources', () => {
     expect(of(out3.records, 'hsn_b2c').some((x) => (x.data as { hsn: string }).hsn === '30049011')).toBe(false);
     expect(out3.issues.some((i) => i.section === 'hsn_b2c' && /30049011.*returns exceed/.test(i.message))).toBe(true);
     expect(validateReturn(out3.records, ctx).issues.filter((i) => i.severity === 'error' && i.section.startsWith('hsn'))).toEqual([]);
+
+    // 0% items → Table 8 (nil-rated), not B2C Small; inter-state returns above inter-state sales of an
+    // HSN that also sells intra-state → no negative IGST in Table 12.
+    const mix: SheetTable = { name: 'Sale Report', rows: [head,
+      row(1, 'A', 'S-1', '10-06-2025', 'Karnataka', '', 'MEROVIX INJ', 0, '3004', 100, 'NOS', 0, 90, 9000, 0, 0),
+      row(2, 'B', 'S-2', '10-06-2025', 'Maharashtra', '', 'Detacal 300', 0, '2309', 10, 'BTL', 0, 90, 900, 0, 0),
+      row(3, 'C', 'S-3', '11-06-2025', 'Karnataka', '', 'PROXONE-1GM', 5, '3004', 300, 'NOS', 0, 22.5, 6750, 0, 168.75),
+      row(4, 'E', 'S-4', '11-06-2025', 'Maharashtra', '', 'Deparadol -SP', 5, '3004', 19, 'BOX', 0, 130, 2470, 123.5, 0),
+    ] };
+    const mixRet: SheetTable = { name: 'Sale Return Report', rows: [head, row(1, 'D', 'SR-20', '12-06-2025', 'Maharashtra', '', 'PROXONE-1GM', 5, '3004', 50, 'NOS', 0, 22.5, 1125, 56.25, 0)] };
+    const out4 = buildMarketplaceRecords(readMarketplaceTables([mix, mixRet], 'm.xlsx', 'auto', profile.allowedRates).lines, opts('generic'));
+    expect(of(out4.records, 'nil').map((x) => x.data)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ splyTy: 'INTRAB2C', nilAmt: 9000 }), expect.objectContaining({ splyTy: 'INTRB2C', nilAmt: 900 })]));
+    expect(of(out4.records, 'b2cs').every((x) => (x.data as { rt: number }).rt !== 0)).toBe(true);
+    const h5 = of(out4.records, 'hsn_b2c').map((x) => x.data as { hsn: string; rt: number; txval: number; iamt: number; camt: number }).find((x) => x.hsn === '3004' && x.rt === 5)!;
+    expect(h5).toMatchObject({ txval: 5625, iamt: 0, camt: 140.63 });
+    expect(of(out4.records, 'hsn_b2c').some((x) => (x.data as { rt: number; hsn: string }).rt === 0 && (x.data as { hsn: string }).hsn === '3004')).toBe(true);
+    expect(validateReturn(out4.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
+    expect(validateGstr1Json(generateGstr1Json(out4.records, ctx).json).ok).toBe(true);
     expect(of(out2.records, 'b2cs').map((x) => x.data)).toEqual(expect.arrayContaining([
       expect.objectContaining({ pos: '29', txval: 2250 }), expect.objectContaining({ pos: '27', txval: 4370 })]));
     expect(of(out2.records, 'cdnr').map((x) => x.data)).toEqual([expect.objectContaining({ ctin: R_MH, ntNum: 'SR-11', ntty: 'C' })]);

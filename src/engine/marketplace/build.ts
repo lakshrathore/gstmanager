@@ -1,5 +1,5 @@
 import type {
-  AnyRecord, B2bData, B2clData, B2csData, CdnrData, DocData, HsnData, Item, Section, ValidationIssue,
+  AnyRecord, B2bData, B2clData, B2csData, CdnrData, DocData, HsnData, Item, NilData, Section, ValidationIssue,
 } from '../types';
 import { checkGstin, computeTax, periodBounds, round2 } from '../util';
 
@@ -266,8 +266,34 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
   const src = (ls: SaleLine[]) => ({ sheet: o.source, rows: ls.slice(0, 20).map((l) => l.row), raw: { file: ls[0].file, lines: ls.length } });
   const isB2b = (l: SaleLine) => !!l.buyerGstin && checkGstin(l.buyerGstin).ok && l.buyerGstin.toUpperCase() !== o.supplierGstin;
 
-  // 2. B2B invoices and credit notes
-  const b2bLines = lines.filter(isB2b);
+  // 2. Nil-rated (0%) supplies → Table 8, by inter/intra-state and registered/unregistered buyer, net
+  // of returns. They stay in the HSN summary at 0% but not in B2B/B2C, which take only taxable rates.
+  const nilLines = lines.filter((l) => l.rate === 0);
+  if (nilLines.length) {
+    const byType = new Map<string, SaleLine[]>();
+    for (const l of nilLines) {
+      const t = `${l.pos && l.pos !== st ? 'INTR' : 'INTRA'}${isB2b(l) ? 'B2B' : 'B2C'}`;
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t)!.push(l);
+    }
+    for (const [splyTy, ls] of byType) {
+      const net = round2(ls.reduce((a, l) => a + sign(l) * l.taxable, 0));
+      if (net === 0) continue;
+      if (net < 0) {
+        issue('warning', 'nil', 'nilAmt', `Nil-rated ${splyTy}: returns exceed this month’s sales (net ${money(net)}) – left out of Table 8`, { value: net });
+        continue;
+      }
+      const data: NilData = { splyTy, nilAmt: net, exptAmt: 0, ngsupAmt: 0 };
+      records.push({ section: 'nil', key: `nil|${splyTy}|${o.source}`, source: src(ls), data } as AnyRecord);
+    }
+    issue('warning', 'nil', 'nilAmt', `${nilLines.length} line(s) at 0% GST are reported as nil-rated supplies in Table 8`, {
+      suggestion: 'If these items are exempt (not nil-rated) or non-GST, edit the Table 8 row and move the amount to the Exempted or Non-GST column.',
+    });
+  }
+  const taxedLines = lines.filter((l) => l.rate !== 0);
+
+  // 3. B2B invoices and credit notes
+  const b2bLines = taxedLines.filter(isB2b);
   const byDoc = new Map<string, SaleLine[]>();
   for (const l of b2bLines) {
     const no = l.kind === 'return' ? l.noteNo || '' : l.invoiceNo || '';
@@ -306,8 +332,8 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     }
   }
 
-  // 3. B2C: large inter-state invoices → B2CL, the rest (net of returns) → B2CS by POS + rate
-  const b2cLines = lines.filter((l) => !isB2b(l));
+  // 4. B2C: large inter-state invoices → B2CL, the rest (net of returns) → B2CS by POS + rate
+  const b2cLines = taxedLines.filter((l) => !isB2b(l));
   const invTotals = new Map<string, number>();
   for (const l of b2cLines) {
     if (l.kind !== 'sale' || !l.invoiceNo) continue;
@@ -349,7 +375,7 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     }
   }
 
-  // 4. Table 12 – HSN summary
+  // 5. Table 12 – HSN summary
   const hsnSection = (l: SaleLine): 'hsn_b2b' | 'hsn_b2c' => (o.hsnSplit && !isB2b(l) ? 'hsn_b2c' : 'hsn_b2b');
   const hsnGroups = new Map<string, SaleLine[]>();
   let noHsn = 0;
@@ -371,6 +397,15 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
       cess += sign(l) * (l.cess ?? 0);
     }
     const rt = ls[0].rate;
+    if ((inter < 0 && intra > 0) || (intra < 0 && inter > 0)) {
+      // Returns on one side (e.g. inter-state) exceed that side's sales while the other side is positive.
+      // Table 12 takes no negative tax, so the net is shown under the positive head – same rate, so the
+      // total tax is unchanged.
+      issue('warning', section, 'iamt', `HSN ${hsn || '(blank)'} (${uqc}, ${rt ?? '?'}%): ${inter < 0 ? 'inter' : 'intra'}-state returns exceed that side’s sales – shown net as ${inter < 0 ? 'CGST/SGST' : 'IGST'} (total tax unchanged)`, {
+        suggestion: 'Table 12 cannot carry negative tax. The return itself still reduces B2C Small / the credit notes.',
+      });
+      if (inter < 0) { intra += inter; inter = 0; } else { inter += intra; intra = 0; }
+    }
     const txval = round2(inter + intra);
     if (txval === 0 && qty === 0) continue;
     if (section === 'hsn_b2c' && (txval < 0 || qty < 0)) {
@@ -387,7 +422,7 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     records.push({ section, key: `${section}|${hsn}|${uqc}|${rt}|${o.source}`, source: src(ls), data } as AnyRecord);
   }
 
-  // 5. Table 13 – documents issued: the marketplace's document register when given, else the
+  // 6. Table 13 – documents issued: the marketplace's document register when given, else the
   // invoice and credit-note numbers in the report.
   const docs = docLines.length
     ? docLines.map((d) => ({ ...d }))
@@ -404,7 +439,7 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     });
   }
 
-  // 6. summary
+  // 7. summary
   summary.salesTaxable = round2(summary.salesTaxable);
   summary.returnsTaxable = round2(summary.returnsTaxable);
   summary.netTaxable = round2(summary.salesTaxable - summary.returnsTaxable);

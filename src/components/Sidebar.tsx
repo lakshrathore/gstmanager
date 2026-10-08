@@ -26,7 +26,7 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
   ];
   const active = (h: string) => (h === '/' ? path === '/' || path.startsWith('/returns') : path === h || path.startsWith(`${h}/`));
   return (
-    <aside className="flex items-center justify-between gap-4 border-b border-rule bg-ink px-4 py-3 text-white md:sticky md:top-0 md:h-screen md:flex-col md:items-stretch md:justify-start md:border-0 md:px-4 md:py-6">
+    <aside className="flex items-center justify-between gap-4 border-b border-rule bg-ink px-4 py-3 text-white md:sticky md:top-0 md:h-screen md:flex-col md:overflow-y-auto md:items-stretch md:justify-start md:border-0 md:px-4 md:py-6">
       <Link href="/" className="text-[16px] font-semibold leading-tight">GST Return<br className="hidden md:block" /> Desk</Link>
       <nav className="flex gap-1 md:mt-8 md:flex-col">
         {links.map((l) => (

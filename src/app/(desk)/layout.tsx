@@ -16,7 +16,10 @@ export default async function DeskLayout({ children }: LayoutProps<'/'>) {
         : null;
   return (
     <div className="min-h-screen md:grid md:grid-cols-[220px_1fr]">
-      <Sidebar user={{ name: auth.name, role: auth.role }} plan={lic.status === 'active' ? lic.plan?.name ?? null : null} canManageTeam={can(auth, 'org:manage')} canReset={can(auth, 'org:reset')} />
+      {/* The dark column runs the full page height; the sidebar inside it stays in view while scrolling. */}
+      <div className="md:bg-ink">
+        <Sidebar user={{ name: auth.name, role: auth.role }} plan={lic.status === 'active' ? lic.plan?.name ?? null : null} canManageTeam={can(auth, 'org:manage')} canReset={can(auth, 'org:reset')} />
+      </div>
       <main className="min-w-0 px-4 py-6 md:px-8 md:py-8">
         {banner && (
           <div role="status" className={`mx-auto mb-6 flex max-w-5xl flex-wrap items-center justify-between gap-2 rounded-md border px-4 py-3 text-[13.5px] ${banner.tone}`}>

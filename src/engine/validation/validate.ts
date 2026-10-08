@@ -359,8 +359,12 @@ function crossChecks(records: AnyRecord[], ctx: ReturnContext, out: ValidationIs
   }
 
   // Table 12 reconciliation
-  const sum = (secs: Section[], sign = true) =>
-    records.filter((r) => secs.includes(r.section)).reduce((a, r) => {
+  // Table 8 belongs to the B2B or B2C side by its supply type; nil-rated and exempt supplies are in
+  // Table 12 at 0% (non-GST supplies are not).
+  const nilSide = (splyTy: string) => (/B2B$/.test(splyTy) ? 'b2b' : 'b2c');
+  const sum = (secs: Section[], sign = true, nil?: 'b2b' | 'b2c' | 'all') =>
+    records.filter((r) => secs.includes(r.section) || (nil && r.section === 'nil' && (nil === 'all' || nilSide((r.data as { splyTy: string }).splyTy) === nil))).reduce((a, r) => {
+      if (r.section === 'nil') { const d = r.data as { nilAmt: number | null; exptAmt: number | null }; return a + (d.nilAmt ?? 0) + (d.exptAmt ?? 0); }
       if (r.section === 'b2cs' || r.section === 'hsn_b2b' || r.section === 'hsn_b2c') return a + (r.data.txval ?? 0);
       if ('items' in r.data && r.section !== 'at' && r.section !== 'txpd') {
         const tx = (r.data.items as Item[]).reduce((x, i) => x + (i.txval ?? 0), 0);
@@ -370,24 +374,27 @@ function crossChecks(records: AnyRecord[], ctx: ReturnContext, out: ValidationIs
       return a;
     }, 0);
   const has = (s: Section) => records.some((r) => r.section === s);
-  const recon = (label: string, hsnSec: Section, secs: Section[]) => {
-    const books = round2(sum(secs)), hsn = round2(sum([hsnSec]));
+  const NAMES: Partial<Record<Section, string>> = { b2b: 'B2B', cdnr: 'CN/DN registered', b2cl: 'B2C Large', b2cs: 'B2C Small', exp: 'Exports', cdnur: 'CN/DN unregistered' };
+  const inr = (n: number) => `₹${round2(n).toLocaleString('en-IN')}`;
+  const recon = (label: string, hsnSec: Section, secs: Section[], nil: 'b2b' | 'b2c' | 'all') => {
+    const books = round2(sum(secs, true, nil)), hsn = round2(sum([hsnSec]));
     const diff = Math.abs(books - hsn);
     if (diff > Math.max(100, Math.abs(books) * 0.01)) {
+      const parts = [...secs.filter(has).map((s) => `${NAMES[s] ?? s} ${inr(sum([s]))}`), ...(sum([], true, nil) ? [`Nil/exempt (Table 8) ${inr(sum([], true, nil))}`] : [])];
       out.push({
         code: 'HSN_RECONCILIATION', severity: 'warning', section: hsnSec, recordKey: '', field: 'txval', value: hsn,
-        message: `${label}: HSN taxable value ₹${hsn.toLocaleString('en-IN')} differs from document total ₹${books.toLocaleString('en-IN')}`,
-        suggestion: 'Table 12 should match the taxable value of the corresponding sections (net of credit notes).',
+        message: `${label}: HSN taxable value ${inr(hsn)} differs from the documents ${inr(books)} (${parts.join(' + ') || 'none'}) by ${inr(hsn - books)}`,
+        suggestion: 'Table 12 should match the taxable value of these tables, net of credit notes. Common causes: an HSN row left out because returns exceeded sales, records added or edited by hand on one side only.',
       });
     }
   };
   if (ctx.profile.hsnSplit) {
     if ((has('b2b') || has('cdnr')) && !has('hsn_b2b')) out.push({ code: 'HSN_B2B_MISSING', severity: 'error', section: 'hsn_b2b', recordKey: '', field: 'hsn', message: 'B2B supplies exist but Table 12 (B2B HSN) is empty', suggestion: 'Fill the hsn(b2b) sheet.' });
     if ((has('b2cl') || has('b2cs') || has('exp')) && !has('hsn_b2c')) out.push({ code: 'HSN_B2C_MISSING', severity: 'warning', section: 'hsn_b2c', recordKey: '', field: 'hsn', message: 'B2C supplies exist but Table 12 (B2C HSN) is empty' });
-    recon('B2B', 'hsn_b2b', ['b2b', 'cdnr']);
-    recon('B2C', 'hsn_b2c', ['b2cl', 'b2cs', 'exp', 'cdnur']);
+    recon('B2B', 'hsn_b2b', ['b2b', 'cdnr'], 'b2b');
+    recon('B2C', 'hsn_b2c', ['b2cl', 'b2cs', 'exp', 'cdnur'], 'b2c');
   } else {
-    recon('All supplies', 'hsn_b2b', ['b2b', 'cdnr', 'b2cl', 'b2cs', 'exp', 'cdnur']);
+    recon('All supplies', 'hsn_b2b', ['b2b', 'cdnr', 'b2cl', 'b2cs', 'exp', 'cdnur'], 'all');
   }
 }
 

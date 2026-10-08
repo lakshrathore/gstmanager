@@ -317,6 +317,8 @@ describe('generic sales register and merging sources', () => {
     expect(h5).toMatchObject({ txval: 5625, iamt: 0, camt: 140.63 });
     expect(of(out4.records, 'hsn_b2c').some((x) => (x.data as { rt: number; hsn: string }).rt === 0 && (x.data as { hsn: string }).hsn === '3004')).toBe(true);
     expect(validateReturn(out4.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
+    // HSN (B2C) = B2C Small + nil-rated B2C (Table 8): no reconciliation warning.
+    expect(validateReturn(out4.records, ctx).issues.filter((i) => i.code === 'HSN_RECONCILIATION')).toEqual([]);
     expect(validateGstr1Json(generateGstr1Json(out4.records, ctx).json).ok).toBe(true);
     expect(of(out2.records, 'b2cs').map((x) => x.data)).toEqual(expect.arrayContaining([
       expect.objectContaining({ pos: '29', txval: 2250 }), expect.objectContaining({ pos: '27', txval: 4370 })]));

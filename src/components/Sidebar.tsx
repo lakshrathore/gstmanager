@@ -8,6 +8,7 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
   const path = usePathname();
   const router = useRouter();
   const links = [
+    { href: '/companies', label: 'Companies' },
     { href: '/firm', label: 'Firm dashboard' },
     { href: '/documents', label: 'Client documents' },
     { href: '/search', label: 'Search' },
@@ -17,7 +18,6 @@ export function Sidebar({ user, plan, canManageTeam, canReset }: { user: { name:
     { href: '/gstr3b', label: 'GSTR-3B' },
     { href: '/gstr9', label: 'GSTR-9' },
     { href: '/gstr9c', label: 'GSTR-9C' },
-    { href: '/companies', label: 'Companies' },
     { href: '/recon', label: 'Reconciliation' },
     { href: '/tools', label: 'Validators' },
     ...(canManageTeam ? [{ href: '/team', label: 'Team' }] : []),

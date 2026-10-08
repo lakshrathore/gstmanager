@@ -249,7 +249,10 @@ const GENERIC: FormatDef = {
     qty: ['qty', 'quantity', 'units'],
     freeQty: ['free qty', 'free quantity', 'scheme qty', 'bonus qty'],
     unit: ['unit', 'uqc', 'uom', 'unit of measure', 'qty unit'],
-    rate: ['gst rate', 'rate', 'tax rate', 'gst %', 'gst', 'rate %'],
+    gstRate: ['gst rate', 'tax rate', 'gst %', 'rate of tax', 'gst rate %', 'rate %', 'gst'],
+    // Plain "Rate" is often the selling price – used only when it agrees with the tax charged.
+    rate: ['rate'],
+    invoiceValue: ['bill amount', 'invoice value', 'invoice amount', 'bill value', 'bill total', 'invoice total', 'grand total', 'total amount', 'net payable'],
     taxable: ['taxable value', 'taxable amount', 'taxable', 'assessable value', 'net amount'],
     igst: ['igst', 'igst amount'],
     cgst: ['cgst', 'cgst amount'],
@@ -270,17 +273,25 @@ const GENERIC: FormatDef = {
     const named: LineKind = /return|credit|refund|cn\b/.test(type) || returnReport ? 'return' : /cancel/.test(type) ? 'skip' : 'sale';
     const taxable = num(get('taxable'));
     const kind: LineKind = named === 'sale' && taxable < 0 ? 'return' : named;
-    const reportedTax = Math.abs(num(get('igst'))) + Math.abs(num(get('cgst'))) + Math.abs(num(get('sgst')));
-    const rate = normaliseRate(parseNumber(get('rate')), ctx.allowedRates) ?? rateFromTax(reportedTax || null, taxable, ctx.allowedRates);
+    const igst = Math.abs(num(get('igst'))), cgst = Math.abs(num(get('cgst'))), sgst = Math.abs(num(get('sgst')));
+    const reportedTax = igst + cgst + sgst;
+    const fromTax = rateFromTax(reportedTax || null, taxable, ctx.allowedRates);
+    const plain = normaliseRate(parseNumber(get('rate')), ctx.allowedRates);
+    const rate = normaliseRate(parseNumber(get('gstRate')), ctx.allowedRates)
+      ?? (plain != null && (fromTax == null || plain === fromTax) && (reportedTax > 0 || plain === 0 || !ctx.has('igst')) ? plain : fromTax);
+    const posRaw = str(get('state'));
     return line({
-      file: ctx.file, row: ctx.row, kind, skipReason: kind === 'skip' ? 'Cancelled' : undefined,
+      file: ctx.file, row: ctx.row, kind, skipReason: kind === 'skip' ? 'Cancelled' : undefined, cancel: kind === 'skip' || undefined,
+      export: /other\s*country|outside\s*india|export|foreign|^96(\D|$)/i.test(posRaw) || undefined,
+      invoiceValue: Math.abs(num(get('invoiceValue'))) || undefined,
+      reportedIgst: ctx.has('igst') ? igst : undefined, reportedCgst: ctx.has('cgst') ? cgst : undefined,
       sellerGstin: str(get('sellerGstin')).toUpperCase() || undefined,
       invoiceNo: str(get('invoiceNo')) || undefined, invoiceDate: dateOf(get('invoiceDate')),
       // In a return report the bill number is the credit note's own number.
       noteNo: str(get('noteNo')) || (kind === 'return' ? str(get('invoiceNo')) : '') || undefined,
       noteDate: dateOf(get('noteDate')) ?? (kind === 'return' ? dateOf(get('invoiceDate')) : undefined),
       buyerGstin: str(get('buyerGstin')).toUpperCase() || undefined, buyerName: str(get('buyerName')) || undefined,
-      pos: stateCode(get('state')), posRaw: str(get('state')), hsn: hsnOf(get('hsn')), description: str(get('description')) || undefined,
+      pos: stateCode(get('state')), posRaw, hsn: hsnOf(get('hsn')), description: str(get('description')) || undefined,
       // Free (scheme) quantity is supplied too, so it counts in the HSN quantity.
       qty: Math.abs(num(get('qty'))) + Math.abs(num(get('freeQty'))), uqc: uqcOf(get('unit')),
       rate, taxable: Math.abs(taxable), reportedTax: reportedTax || undefined, cess: Math.abs(num(get('cess'))) || undefined,

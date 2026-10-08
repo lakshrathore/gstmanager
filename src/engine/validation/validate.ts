@@ -187,6 +187,7 @@ const BASE_RULES: { [S in Exclude<Section, AmendSection>]: Rule<S> } = {
     if (d.typ === 'OE' && d.etin) add('etin', 'E-commerce GSTIN must be blank when Type is OE', { value: d.etin, suggestion: 'Change Type to E or clear the GSTIN.' });
     if (d.etin) gstinField(add, 'etin', d.etin, ctx, 'E-commerce GSTIN');
     rateCheck(add, d.rt, ctx);
+    if (d.rt === 0) add('rt', 'B2C Others takes taxable supplies only – 0% (nil-rated / exempt) supplies go to Table 8', { value: 0, suggestion: 'Delete this line and enter the amount in Nil / Exempt (Table 8) under the matching inter/intra-state B2C description.' });
     nonNeg(add, 'txval', d.txval, 'Taxable value');
     taxCheck(add, d, d.txval, { pos: d.pos, supplierState: ss(ctx), diffPercent: d.diffPercent }, 0);
   },

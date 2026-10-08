@@ -326,4 +326,44 @@ describe('generic sales register and merging sources', () => {
     expect(of(out2.records, 'docs').map((x) => (x.data as { docTyp: string }).docTyp)).toContain('Credit Note');
     expect(validateGstr1Json(generateGstr1Json(out2.records, ctx).json).ok).toBe(true);
   });
+
+  it('applies the GSTR-1 conditions to a billing-software report', () => {
+    // Supplier in Karnataka (29). Columns: no "GST Rate" – only "Rate" (the price) and the tax amounts.
+    const head = ['Bill No', 'Bill Date', 'Ledger Name', 'GST No', 'Place of Supply', 'Item Name', 'HSN', 'Qty', 'Unit', 'Rate', 'Taxable Amount', 'IGST', 'CGST', 'SGST', 'Bill Amount', 'Type'];
+    const t: SheetTable = { name: 'Sale Report', rows: [head,
+      // B2B with a blank place of supply → buyer's state from the GSTIN (27, inter-state); bill amount with round-off.
+      ['B-1', '05/06/2025', 'Mumbai Traders', R_MH, '', 'Widget', '8471', 10, 'Nos', 18, 1000, 50, 0, 0, 1050.4, 'Sale'],
+      // Mistyped GSTIN → B2C, with a warning.
+      ['B-2', '05/06/2025', 'Typo Co', '27AAACR5055K1ZX', 'Maharashtra', 'Widget', '8471', 1, 'Nos', 500, 500, 25, 0, 0, 525, 'Sale'],
+      // IGST charged within Karnataka → warning.
+      ['B-3', '06/06/2025', 'Local', '', 'Karnataka', 'Widget', '8471', 1, 'Nos', 200, 200, 10, 0, 0, 210, 'Sale'],
+      // Service (SAC) → UQC NA, qty 0.
+      ['B-4', '06/06/2025', 'Local', '', 'Karnataka', 'Repair', '998319', 1, 'Nos', 1000, 1000, 0, 25, 25, 1050, 'Sale'],
+      // Cancelled bill → Table 13 cancelled.
+      ['B-5', '06/06/2025', 'Local', '', 'Karnataka', 'Widget', '8471', 1, 'Nos', 100, 100, 0, 2.5, 2.5, 105, 'Cancelled'],
+      // Export → error, not in B2C.
+      ['B-6', '07/06/2025', 'Dubai LLC', '', 'Other Country', 'Widget', '8471', 1, 'Nos', 9000, 9000, 450, 0, 0, 9450, 'Sale'],
+      // Large inter-state B2C bill and its return (credit note) → B2CL and CDNUR (B2CL).
+      ['B-7', '07/06/2025', 'Walk-in', '', 'Maharashtra', 'Widget', '8471', 100, 'Nos', 1200, 120000, 6000, 0, 0, 126000, 'Sale'],
+      ['CN-1', '08/06/2025', 'Walk-in', '', 'Maharashtra', 'Widget', '8471', 100, 'Nos', 1200, 120000, 6000, 0, 0, 126000, 'Return'],
+    ] };
+    const r = readMarketplaceTables([t], 'sales.xlsx', 'auto', profile.allowedRates);
+    // "Rate" 18 is the price; the tax says 5%.
+    expect(r.lines[0].rate).toBe(5);
+    const out = buildMarketplaceRecords(r.lines, opts('generic'));
+    const b2b = of(out.records, 'b2b').map((x) => x.data as { ctin: string; pos: string; val: number });
+    expect(b2b).toEqual([expect.objectContaining({ ctin: R_MH, pos: '27', val: 1050.4 })]);
+    expect(out.issues.some((i) => i.field === 'ctin' && /27AAACR5055K1ZX/.test(i.message))).toBe(true);
+    expect(out.issues.some((i) => i.field === 'iamt' && /B-3/.test(i.message))).toBe(true);
+    expect(out.issues.some((i) => i.section === 'exp' && /B-6/.test(i.message))).toBe(true);
+    expect(of(out.records, 'b2cs').some((x) => (x.data as { txval: number }).txval >= 9000)).toBe(false);
+    expect(of(out.records, 'b2cl').map((x) => x.data)).toEqual([expect.objectContaining({ inum: 'B-7', val: 126000 })]);
+    expect(of(out.records, 'cdnur').map((x) => x.data)).toEqual([expect.objectContaining({ ntNum: 'CN-1', urType: 'B2CL', pos: '27', ntty: 'C' })]);
+    const sac = [...of(out.records, 'hsn_b2c'), ...of(out.records, 'hsn_b2b')].map((x) => x.data as { hsn: string; uqc: string; qty: number }).find((h) => h.hsn === '998319');
+    expect(sac).toMatchObject({ uqc: 'NA', qty: 0 });
+    const inv = of(out.records, 'docs').map((x) => x.data as { docTyp: string; cancel: number; totnum: number }).find((d) => d.docTyp === 'Invoices for outward supply');
+    expect(inv).toMatchObject({ cancel: 1 });
+    expect(validateReturn(out.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
+    expect(validateGstr1Json(generateGstr1Json(out.records, ctx).json).ok).toBe(true);
+  });
 });

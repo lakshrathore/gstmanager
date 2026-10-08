@@ -1,5 +1,5 @@
 import type {
-  AnyRecord, B2bData, B2clData, B2csData, CdnrData, DocData, HsnData, Item, NilData, Section, ValidationIssue,
+  AnyRecord, B2bData, B2clData, B2csData, CdnrData, CdnurData, DocData, HsnData, Item, NilData, Section, ValidationIssue,
 } from '../types';
 import { checkGstin, computeTax, periodBounds, round2 } from '../util';
 
@@ -43,6 +43,13 @@ export interface SaleLine {
   taxable: number;
   /** Tax shown in the report (positive), for reconciliation only. */
   reportedTax?: number;
+  /** IGST and CGST shown in the report (positive) – to catch bills charged with the wrong tax type. */
+  reportedIgst?: number;
+  reportedCgst?: number;
+  /** The bill's own total (taxable + tax + round-off + any 0% items), repeated on each of its rows. */
+  invoiceValue?: number;
+  /** Place of supply is outside India – an export (Table 6A), not a B2C sale. */
+  export?: boolean;
   cess?: number;
   /** Amazon "Cancel" / Flipkart "Cancellation": voids the sale with the same invoice number. */
   cancel?: boolean;
@@ -217,10 +224,35 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
   // 1. keep only taxable events of this GSTIN
   const skipped = new Map<string, number>();
   const lines: SaleLine[] = [];
-  for (const l of all) {
-    if (l.kind === 'skip') { skipped.set(l.skipReason ?? 'Not a sale or return', (skipped.get(l.skipReason ?? 'Not a sale or return') ?? 0) + 1); continue; }
-    if (l.sellerGstin && l.sellerGstin.toUpperCase() !== o.supplierGstin) { summary.otherGstinLines++; continue; }
+  const exports: SaleLine[] = [];
+  const badGstin = new Map<string, string[]>();
+  for (const l0 of all) {
+    if (l0.kind === 'skip') { skipped.set(l0.skipReason ?? 'Not a sale or return', (skipped.get(l0.skipReason ?? 'Not a sale or return') ?? 0) + 1); continue; }
+    if (l0.sellerGstin && l0.sellerGstin.toUpperCase() !== o.supplierGstin) { summary.otherGstinLines++; continue; }
+    if (l0.export) { exports.push(l0); continue; }
+    let l = l0;
+    const g = l.buyerGstin?.toUpperCase();
+    if (g && !checkGstin(g).ok) {
+      // A mistyped GSTIN makes a B2B sale look like B2C – the buyer would lose the ITC.
+      const bills = badGstin.get(g) ?? [];
+      bills.push(l.kind === 'return' ? l.noteNo || l.invoiceNo || `row ${l.row}` : l.invoiceNo || `row ${l.row}`);
+      badGstin.set(g, bills);
+    } else if (g && !l.pos) {
+      // B2B without a place of supply: the buyer's state (from the GSTIN).
+      l = { ...l, pos: g.slice(0, 2) };
+    }
     lines.push(l);
+  }
+  for (const [g, bills] of badGstin) {
+    issue('warning', 'b2b', 'ctin', `GST No "${g}" is not a valid GSTIN (${(checkGstin(g) as { reason?: string }).reason ?? 'check digit'}) – bill(s) ${[...new Set(bills)].slice(0, 5).join(', ')} reported as B2C`, {
+      value: g, suggestion: 'Correct the GSTIN in your billing software (party ledger) and import again, so the sale goes to B2B and the buyer gets the ITC.',
+    });
+  }
+  if (exports.length) {
+    const bills = [...new Set(exports.map((l) => l.invoiceNo || `row ${l.row}`))];
+    issue('error', 'exp', 'pos', `${bills.length} export bill(s) (place of supply outside India) not included: ${bills.slice(0, 5).join(', ')}${bills.length > 5 ? ' …' : ''}`, {
+      suggestion: 'Exports go to Table 6A with the export type (with/without payment), port code and shipping bill – add them on the Records tab (Exports).',
+    });
   }
   summary.skipped = [...skipped].map(([reason, count]) => ({ reason, count }));
   if (summary.otherGstinLines) {
@@ -247,6 +279,20 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     if (l.rate == null) badRate.push(l);
   }
   summary.reportedTax = reportedSeen ? round2(reported) : null;
+  // Bills charged with the wrong tax type: IGST within the state, or CGST/SGST across states.
+  const wrongType = new Set<string>();
+  for (const l of lines) {
+    if (!l.pos || !l.rate || l.reportedIgst == null || l.reportedCgst == null) continue;
+    const inter = l.pos !== st;
+    if ((inter && l.reportedCgst > 0.5 && l.reportedIgst < 0.5) || (!inter && l.reportedIgst > 0.5 && l.reportedCgst < 0.5)) {
+      wrongType.add(l.kind === 'return' ? l.noteNo || l.invoiceNo || `row ${l.row}` : l.invoiceNo || `row ${l.row}`);
+    }
+  }
+  if (wrongType.size) {
+    issue('warning', 'b2cs', 'iamt', `${wrongType.size} bill(s) charge IGST / CGST+SGST not matching the place of supply: ${[...wrongType].slice(0, 5).join(', ')}${wrongType.size > 5 ? ' …' : ''}`, {
+      suggestion: 'GSTR-1 shows the tax the place of supply requires (IGST between states, CGST + SGST within the state). Check the party state in your billing software; a bill with the wrong tax type needs a credit note and a fresh bill.',
+    });
+  }
   for (const [raw, count] of badPos) {
     issue('error', 'b2cs', 'pos', `Place of supply "${raw}" not recognised on ${count} line(s)`, { value: raw, suggestion: 'Those lines are grouped under a blank place of supply – edit the B2C record to the correct state.' });
   }
@@ -311,13 +357,24 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     });
   };
   const docValue = (items: Item[]) => round2(items.reduce((a, i) => a + (i.txval ?? 0) + (i.iamt ?? 0) + (i.camt ?? 0) + (i.samt ?? 0) + (i.csamt ?? 0), 0));
+  // The bill's own total when the report has it (includes round-off and 0% items); else taxable + tax.
+  const billValue = new Map<string, number>();
+  for (const l of lines) {
+    const no = (l.kind === 'return' ? l.noteNo : l.invoiceNo)?.toUpperCase();
+    if (no && l.invoiceValue && l.invoiceValue > 0) billValue.set(`${l.kind}|${no}`, Math.max(billValue.get(`${l.kind}|${no}`) ?? 0, l.invoiceValue));
+  }
+  const valueOf = (kind: LineKind, no: string | undefined, items: Item[]) => {
+    const computed = docValue(items);
+    const given = no ? billValue.get(`${kind}|${no.toUpperCase()}`) : undefined;
+    return given != null && given >= computed - 1 ? round2(given) : computed;
+  };
   for (const ls of byDoc.values()) {
     const f = ls[0];
     const items = itemsOf(ls, f.pos);
     const ctin = f.buyerGstin!.toUpperCase();
     if (f.kind === 'sale') {
       const data: B2bData = {
-        ctin, receiverName: f.buyerName || undefined, inum: f.invoiceNo ?? '', idt: f.invoiceDate ?? '', val: docValue(items), pos: f.pos,
+        ctin, receiverName: f.buyerName || undefined, inum: f.invoiceNo ?? '', idt: f.invoiceDate ?? '', val: valueOf('sale', f.invoiceNo, items), pos: f.pos,
         rchrg: 'N', invTyp: 'R', etin: etin || undefined, diffPercent: null, items,
       };
       if (!data.inum) issue('error', 'b2b', 'inum', `B2B sale to ${ctin} has no invoice number (${f.file} row ${f.row})`);
@@ -325,7 +382,7 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     } else {
       const data: CdnrData = {
         ctin, receiverName: f.buyerName || undefined, ntNum: f.noteNo ?? '', ntDt: f.noteDate || f.invoiceDate || '', ntty: 'C', pos: f.pos,
-        rchrg: 'N', invTyp: 'R', val: docValue(items), diffPercent: null, items,
+        rchrg: 'N', invTyp: 'R', val: valueOf('return', f.noteNo, items), diffPercent: null, items,
       };
       if (!data.ntNum) issue('error', 'cdnr', 'ntNum', `B2B return from ${ctin} has no credit note number (${f.file} row ${f.row})`, { suggestion: 'Enter the credit note number the marketplace issued.' });
       records.push({ section: 'cdnr', key: `cdnr|${ctin}|${data.ntNum.toUpperCase() || `${o.source}:${f.row}`}`, source: src(ls), data });
@@ -334,19 +391,32 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
 
   // 4. B2C: large inter-state invoices → B2CL, the rest (net of returns) → B2CS by POS + rate
   const b2cLines = taxedLines.filter((l) => !isB2b(l));
-  const invTotals = new Map<string, number>();
+  // Value of each B2C bill / note for the B2C Large limit: the bill's own total when given (it also
+  // counts 0% items), else taxable + tax of its lines.
+  const docTotals = new Map<string, number>();
   for (const l of b2cLines) {
-    if (l.kind !== 'sale' || !l.invoiceNo) continue;
+    const no = (l.kind === 'return' ? l.noteNo : l.invoiceNo)?.toUpperCase();
+    if (!no) continue;
     const t = tax(l.rate, l.taxable, l.pos);
-    invTotals.set(l.invoiceNo.toUpperCase(), (invTotals.get(l.invoiceNo.toUpperCase()) ?? 0) + l.taxable + t.iamt + t.camt + t.samt + (l.cess ?? 0));
+    const k = `${l.kind}|${no}`;
+    docTotals.set(k, (docTotals.get(k) ?? 0) + l.taxable + t.iamt + t.camt + t.samt + (l.cess ?? 0));
   }
+  for (const [k, v] of billValue) if (docTotals.has(k)) docTotals.set(k, Math.max(docTotals.get(k)!, v));
+  const large = (l: SaleLine) => {
+    const no = (l.kind === 'return' ? l.noteNo : l.invoiceNo)?.toUpperCase();
+    return !!no && !!l.pos && l.pos !== st && (docTotals.get(`${l.kind}|${no}`) ?? 0) > o.b2clThreshold;
+  };
   const b2clInv = new Map<string, SaleLine[]>();
+  const cdnurNotes = new Map<string, SaleLine[]>();
   const b2csBuckets = new Map<string, SaleLine[]>();
   for (const l of b2cLines) {
-    const inv = l.invoiceNo?.toUpperCase();
-    if (l.kind === 'sale' && inv && l.pos && l.pos !== st && (invTotals.get(inv) ?? 0) > o.b2clThreshold) {
-      if (!b2clInv.has(inv)) b2clInv.set(inv, []);
-      b2clInv.get(inv)!.push(l);
+    if (large(l)) {
+      // Inter-state bill above the limit → B2C Large; a return of that size is a credit note against a
+      // B2C Large bill → Table 9B (unregistered, B2CL), not a deduction from B2C Small.
+      const target = l.kind === 'sale' ? b2clInv : cdnurNotes;
+      const no = (l.kind === 'sale' ? l.invoiceNo : l.noteNo)!.toUpperCase();
+      if (!target.has(no)) target.set(no, []);
+      target.get(no)!.push(l);
       continue;
     }
     const k = `${l.pos}|${l.rate}`;
@@ -356,8 +426,17 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
   for (const ls of b2clInv.values()) {
     const f = ls[0];
     const items = itemsOf(ls, f.pos);
-    const data: B2clData = { inum: f.invoiceNo!, idt: f.invoiceDate ?? '', val: docValue(items), pos: f.pos, etin: etin || undefined, diffPercent: null, items };
+    const data: B2clData = { inum: f.invoiceNo!, idt: f.invoiceDate ?? '', val: valueOf('sale', f.invoiceNo, items), pos: f.pos, etin: etin || undefined, diffPercent: null, items };
     records.push({ section: 'b2cl', key: `b2cl|${f.invoiceNo!.toUpperCase()}`, source: src(ls), data });
+  }
+  for (const ls of cdnurNotes.values()) {
+    const f = ls[0];
+    const items = itemsOf(ls, f.pos);
+    const data: CdnurData = { urType: 'B2CL', ntNum: f.noteNo!, ntDt: f.noteDate || f.invoiceDate || '', ntty: 'C', pos: f.pos, val: valueOf('return', f.noteNo, items), diffPercent: null, items };
+    records.push({ section: 'cdnur', key: `cdnur|${f.noteNo!.toUpperCase()}`, source: src(ls), data });
+    issue('warning', 'cdnur', 'urType', `Credit note ${f.noteNo} (${money(data.val ?? 0)}, inter-state, unregistered) reported in Table 9B as against a B2C Large bill`, {
+      suggestion: 'If the original bill was below the B2C Large limit, delete this note from CDNUR and reduce B2C Small of that state instead.',
+    });
   }
   for (const ls of b2csBuckets.values()) {
     const f = ls[0];
@@ -418,7 +497,9 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     }
     const ti = rt == null ? 0 : round2((inter * rt) / 100);
     const half = rt == null ? 0 : round2((intra * rt) / 200);
-    const data: HsnData = { hsn, desc: ls.find((l) => l.description)?.description?.slice(0, 30), uqc, qty: round2(qty), rt, txval, iamt: ti, camt: half, samt: half, csamt: round2(cess) };
+    // Services (SAC 99…) have no quantity: UQC "NA", quantity 0.
+    const sac = hsn.startsWith('99');
+    const data: HsnData = { hsn, desc: ls.find((l) => l.description)?.description?.slice(0, 30), uqc: sac ? 'NA' : uqc, qty: sac ? 0 : round2(qty), rt, txval, iamt: ti, camt: half, samt: half, csamt: round2(cess) };
     records.push({ section, key: `${section}|${hsn}|${uqc}|${rt}|${o.source}`, source: src(ls), data } as AnyRecord);
   }
 
@@ -429,6 +510,8 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     : [
         ...lines.filter((l) => l.kind === 'sale' && l.invoiceNo).map((l) => ({ type: 'invoice' as const, number: l.invoiceNo! })),
         ...[...cancelledInvoices].map((n) => ({ type: 'invoice' as const, number: n, cancelled: true })),
+        // Bills the report marks as cancelled (kept as skipped lines) – counted as cancelled in Table 13.
+        ...all.filter((l) => l.kind === 'skip' && l.cancel && l.invoiceNo).map((l) => ({ type: 'invoice' as const, number: l.invoiceNo!, cancelled: true })),
         ...lines.filter((l) => l.kind === 'return' && l.noteNo).map((l) => ({ type: 'credit' as const, number: l.noteNo! })),
       ];
   records.push(...docRecords(docs, o.source));

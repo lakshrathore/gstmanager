@@ -283,6 +283,11 @@ The **From the GST portal** tab downloads returns as GSTN holds them, through th
 3. Each return/period is one request, with progress and **Stop**. A GSTR-1 section GSTN fails on is noted and the rest is kept. Login, permission or plan errors stop the run.
 4. What was fetched is kept, so it downloads again (**Excel** or **JSON**, or **Download all as ZIP**) without another API call. Periods already downloaded are skipped unless *Fetch again* is ticked; each fetch is a paid Sandbox call (GSTR-1 ≈ 19 per month).
 5. *Also add to Client documents* (on by default) puts GSTR-1, GSTR-3B, GSTR-2A and GSTR-2B there as well, typed exactly, for checks, search, reports and Purchase vs GSTR-2B.
+6. *Show GSTR-1, GSTR-3B and GSTR-9 in their forms* (on by default) puts the downloaded data into the app's own form for the period, and the table's **Form** column says what happened (with a link to open it):
+   - **Filed · locked** – GSTN lists the return as filed (Track Returns; for GSTR-9 the public filing list): the form gets exactly the filed data and is locked as filed with GSTN's ARN and date. GSTN's filing record is kept as the acknowledgement; the return shows "Filed outside this app".
+   - **Filled** – not filed yet: a blank form (or one filled from an earlier download) gets GSTN's data. GSTR-1 creates the return if needed and validates it; GSTR-3B runs its own *Get from the GST portal* step (saved values, auto-calculated liability, ledger balance, filing status – 4 calls).
+   - **Your data kept** – the form already has data you imported or entered and GSTN does not list it as filed: nothing is replaced. **Load into form** replaces it on purpose.
+   - GSTR-1 for the non-quarter months of a quarterly (QRMP) filer is not put into a form (IFF is not prepared here).
 
 ## Validators
 

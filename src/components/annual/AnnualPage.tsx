@@ -110,7 +110,15 @@ export function AnnualPage({ kind }: { kind: Kind }) {
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    call<{ companies: Company[] }>('/api/companies').then((r) => { setCompanies(r.companies); if (r.companies[0]) setCompanyId(r.companies[0]._id); }).catch((e) => setMsg({ tone: 'error', text: e.message }));
+    // Links (e.g. from Downloads): /gstr9?companyId=…&fy=2025-26
+    const u = new URLSearchParams(window.location.search);
+    call<{ companies: Company[] }>('/api/companies').then((r) => {
+      setCompanies(r.companies);
+      const want = u.get('companyId');
+      const c = want && r.companies.some((x) => x._id === want) ? want : r.companies[0]?._id;
+      if (c) setCompanyId(c);
+      if (/^\d{4}-\d{2}$/.test(u.get('fy') ?? '')) setFy(u.get('fy')!);
+    }).catch((e) => setMsg({ tone: 'error', text: e.message }));
   }, []);
 
   const q = `kind=${kind}&companyId=${companyId}&fy=${fy}`;

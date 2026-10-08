@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Notice, Panel } from '@/components/ui';
 import { GstLoginPanel, type Act, type ApiSession } from '@/components/workspace/GstApiFlow';
@@ -16,7 +17,11 @@ import { fyChoices } from '@/server/gst/annual/common';
 type Type = 'gstr1' | 'gstr3b' | 'gstr2a' | 'gstr2b' | 'gstr9' | 'cash_ledger' | 'itc_ledger' | 'filed';
 type Format = 'json' | 'xlsx' | 'both';
 interface Company { _id: string; name: string; gstin: string }
-interface Item { id: string; type: Type; typeName: string; period: string; count: number; notes: string[]; fetchedAt: string; fetchedBy: string | null; inDocuments: boolean }
+type FormState = 'filled' | 'filed' | 'kept' | 'locked' | 'skipped';
+interface Item {
+  id: string; type: Type; typeName: string; period: string; count: number; notes: string[]; fetchedAt: string; fetchedBy: string | null; inDocuments: boolean;
+  form: { state: FormState; note: string; link?: string } | null;
+}
 interface Status {
   available: boolean; reason: string | null; session: ApiSession; login: { steps: string[] }; items: Item[];
   canOperate: boolean; canFetch: boolean;
@@ -36,6 +41,11 @@ const TYPES: { key: Type; label: string; hint: string; yearly?: boolean; noLogin
 ];
 const NAME = Object.fromEntries(TYPES.map((t) => [t.key, t.label])) as Record<Type, string>;
 const FORMAT_LABEL: Record<Format, string> = { json: 'JSON', xlsx: 'Excel', both: 'JSON and Excel' };
+const FORM_LABEL: Record<FormState, [string, string]> = {
+  filled: ['Filled', 'bg-ledger-tint text-ledger'], filed: ['Filed · locked', 'bg-ink text-white'], locked: ['Filed · locked', 'bg-ink text-white'],
+  kept: ['Your data kept', 'bg-amber-tint text-amber'], skipped: ['Not filled', 'bg-black/5 text-ink-soft'],
+};
+const FORM_PAGE: Partial<Record<Type, string>> = { gstr1: 'GSTR-1', gstr3b: 'GSTR-3B', gstr9: 'GSTR-9' };
 
 const key = (fp: string) => Number(fp.slice(2)) * 12 + Number(fp.slice(0, 2));
 const fpOf = (k: number) => { const y = Math.floor((k - 1) / 12); return `${String(k - y * 12).padStart(2, '0')}${y}`; };
@@ -66,6 +76,7 @@ export function PortalDownloads({ companies }: { companies: Company[] }) {
   const [st, setSt] = useState<Status | null>(null);
   const [types, setTypes] = useState<Type[]>(['gstr1', 'gstr3b', 'gstr2b']);
   const [toDocuments, setToDocuments] = useState(true);
+  const [fillForms, setFillForms] = useState(true);
   const [force, setForce] = useState(false);
   const [format, setFormat] = useState<Format>('xlsx');
   const [busy, setBusy] = useState<string | null>(null);
@@ -119,7 +130,7 @@ export function PortalDownloads({ companies }: { companies: Company[] }) {
       const j = list[i];
       setProgress({ done: i, total: list.length, current: `${NAME[j.type]} ${label(j.period)}` });
       try {
-        const r = await call<{ item: Item; skipped: boolean }>('/api/downloads/portal', { method: 'POST', json: { action: 'fetch', companyId: cid, ...j, toDocuments, force } });
+        const r = await call<{ item: Item; skipped: boolean }>('/api/downloads/portal', { method: 'POST', json: { action: 'fetch', companyId: cid, ...j, toDocuments, force, fillForms } });
         out.push({ ...j, state: r.skipped ? 'skipped' : 'ok', count: r.item.count });
       } catch (e) {
         out.push({ ...j, state: 'error', message: (e as Error).message });
@@ -193,6 +204,10 @@ export function PortalDownloads({ companies }: { companies: Company[] }) {
                 <span>Also add GSTR-1, GSTR-3B, GSTR-2A and GSTR-2B to <span className="font-medium">Client documents</span> <span className="text-[12.5px] text-ink-soft">(for checks, search, reports and Purchase vs GSTR-2B)</span></span>
               </label>
               <label className="flex items-start gap-2 font-normal text-ink">
+                <input type="checkbox" className="mt-0.5 h-4 w-4 w-auto" checked={fillForms} onChange={(e) => setFillForms(e.target.checked)} />
+                <span>Show GSTR-1, GSTR-3B and GSTR-9 in their <span className="font-medium">forms</span> <span className="text-[12.5px] text-ink-soft">(returns GSTN lists as filed are filled with the filed data and locked; forms with your own unfiled data are kept – GSTR-3B also brings the ledger and auto-calculated liability)</span></span>
+              </label>
+              <label className="flex items-start gap-2 font-normal text-ink">
                 <input type="checkbox" className="mt-0.5 h-4 w-4 w-auto" checked={force} onChange={(e) => setForce(e.target.checked)} />
                 <span>Fetch again periods already downloaded <span className="text-[12.5px] text-ink-soft">(each fetch is a paid API call; GSTR-1 makes about 19 per month)</span></span>
               </label>
@@ -249,17 +264,32 @@ export function PortalDownloads({ companies }: { companies: Company[] }) {
         {!shown.length ? <Empty title="Nothing downloaded for these returns and periods yet">Pick the returns, log in to GST and press “Download from GST portal”.</Empty> : (
           <div className="-mx-5 overflow-x-auto">
             <table className="ledger">
-              <thead><tr><th className="pl-5">Return</th><th>Period</th><th className="text-right">Rows</th><th>Downloaded</th><th>Files</th><th /></tr></thead>
+              <thead><tr><th className="pl-5">Return</th><th>Period</th><th className="text-right">Rows</th><th>Form</th><th>Downloaded</th><th>Files</th><th /></tr></thead>
               <tbody>
                 {shown.map((it) => (
                   <tr key={it.id}>
                     <td className="pl-5 font-medium">{it.typeName}{it.inDocuments && <div className="text-[11.5px] font-normal text-ledger">In client documents</div>}</td>
                     <td className="whitespace-nowrap">{label(it.period)}</td>
                     <td className="num text-right">{it.count || <span className="text-ink-soft">none</span>}</td>
+                    <td className="max-w-72 text-[12.5px]">
+                      {it.form ? (
+                        <>
+                          <span className={`rounded px-2 py-0.5 text-[11.5px] font-semibold ${FORM_LABEL[it.form.state][1]}`}>{FORM_LABEL[it.form.state][0]}</span>
+                          {it.form.link && <Link href={it.form.link} className="ml-2 text-ledger underline">Open {FORM_PAGE[it.type]}</Link>}
+                          <div className="mt-1 text-[11.5px] text-ink-soft">{it.form.note}</div>
+                          {it.form.state === 'kept' && st?.canFetch && (
+                            <button type="button" className="mt-1 text-[12px] text-ledger underline" disabled={busy !== null}
+                              onClick={() => { if (confirm(`Replace what is in the ${FORM_PAGE[it.type]} form for ${label(it.period)} with the data downloaded from GSTN?`)) void act(`form-${it.id}`, { action: 'load_form', id: it.id }, `${FORM_PAGE[it.type]} ${label(it.period)} loaded into the form.`); }}>
+                              {busy === `form-${it.id}` ? 'Loading…' : 'Load into form'}
+                            </button>
+                          )}
+                        </>
+                      ) : <span className="text-ink-soft">{FORM_PAGE[it.type] ? '—' : ''}</span>}
+                    </td>
                     <td className="whitespace-nowrap text-[12.5px] text-ink-soft">{when(it.fetchedAt)}{it.fetchedBy ? <div>{it.fetchedBy}</div> : null}</td>
                     <td className="whitespace-nowrap text-[13px]">
                       <a href={fileUrl(it, 'xlsx')} className="text-ledger underline">Excel</a>{' · '}<a href={fileUrl(it, 'json')} className="text-ledger underline">JSON</a>
-                      {it.notes.length > 0 && <div className="max-w-72 whitespace-normal text-[11.5px] text-amber">{it.notes.join(' ')}</div>}
+                      {it.notes.length > 0 && <div className="max-w-72 whitespace-normal text-[11.5px] text-ink-soft">{it.notes.join(' ')}</div>}
                     </td>
                     <td className="text-right">{st?.canFetch && <button type="button" className="text-[12px] text-ink-soft hover:text-red-ink" onClick={() => remove(it)} disabled={busy !== null}>Remove</button>}</td>
                   </tr>

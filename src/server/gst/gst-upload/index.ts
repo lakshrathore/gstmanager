@@ -3,11 +3,11 @@ import { periodBounds } from '@/engine';
 import { can, type Auth } from '../../auth';
 import { sha256 } from '../../crypto';
 import { HttpError } from '../../http';
-import { GeneratedJson, oid, PortalEvidence, UploadJob, type CompanyDoc, type GstReturnDoc } from '../../models';
+import { GeneratedJson, GstReturn, oid, PortalEvidence, UploadJob, type CompanyDoc, type GstReturnDoc } from '../../models';
 import { auditReturn } from '../gst-audit';
 import { describeGstnError, getGstClient, GstnError, type GstClientCapabilities, type UploadContext } from '../gst-client';
 import {
-  errorLines, findGstr1Filing, flattenErrorReport, maskPan, PAN_RE, parseGstnDate, parseSummary, STATUS_CD_LABEL,
+  errorLines, findGstr1Filing, type FiledReturn, flattenErrorReport, maskPan, PAN_RE, parseGstnDate, parseSummary, STATUS_CD_LABEL,
 } from '../gst-client/sandbox-protocol';
 import { importPortalErrorReport } from '../gst-error';
 import { gstnHttpError, loginInfo } from '../gst-login';
@@ -458,4 +458,26 @@ export async function evidenceFile(auth: Auth, returnId: string, evidenceId: str
   if (!ev?.content) throw new HttpError(404, 'No file attached to this evidence');
   const c = ev.content as unknown as Buffer | { buffer: ArrayBuffer | Buffer };
   return { ...ev, content: Buffer.isBuffer(c) ? c : Buffer.from(c.buffer as ArrayBuffer) };
+}
+
+/**
+ * A GSTR-1 that GSTN lists as filed, found when the return was downloaded from the GST portal. GSTN's
+ * Track Returns response is kept as the acknowledgement; the ARN and date are GSTN's, never made up.
+ * The return was filed outside this app, so it moves to "filed" from whatever status it had here.
+ */
+export async function recordFiledFromGstn(auth: Auth, ret: GstReturnDoc, f: FiledReturn, raw: unknown) {
+  if (!f.arn) throw new HttpError(422, 'GSTN listed no ARN');
+  const arn = f.arn.toUpperCase();
+  const filedOn = parseGstnDate(f.dof);
+  const from = normalizeStatus(ret.status);
+  const { ev } = await addEvidence(auth, ret, 'acknowledgement', {
+    reference: arn, note: `GSTN Track Returns: ${f.status ?? 'Filed'}${f.dof ? ` on ${f.dof}` : ''} – found when downloading from the GST portal`,
+    file: gstnFile('gstn-track-returns.json', raw),
+  });
+  await GstReturn.updateOne({ _id: ret._id }, {
+    $set: { status: 'filed', 'portal.arn': arn, 'portal.filedVia': 'gstn-download', ...(filedOn ? { 'portal.filedOn': filedOn } : {}) },
+    $push: { statusHistory: { from, to: 'filed', at: new Date(), by: oid(auth.userId), byEmail: auth.email, note: `Filed on GSTN, ARN ${arn} (downloaded from the GST portal)`, evidenceId: ev._id } },
+  });
+  await auditReturn(auth, ret, 'portal.filed_recorded', { evidenceId: String(ev._id), arn, filedOn: f.dof ?? null, via: 'gstn-download' });
+  return arn;
 }

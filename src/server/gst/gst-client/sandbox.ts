@@ -71,8 +71,12 @@ async function request(method: 'GET' | 'POST', path: string, opts: RequestOpts) 
       throw new GstnError(`Could not reach the Sandbox API (${(e as Error).name === 'TimeoutError' ? 'timed out' : 'network error'})`);
     }
     if ((res.status === 429 || res.status >= 500) && i + 1 < attempts) {
-      await sleep(Number(res.headers.get('retry-after')) * 1000 || 1000 * 2 ** i);
-      continue;
+      // "Source unavailable" (503) means GSTN's API does not serve this data – asking again only costs another call.
+      const peek = (await res.clone().json().catch(() => null)) as { message?: string } | null;
+      if (!(res.status === 503 && /source unavailable/i.test(peek?.message ?? ''))) {
+        await sleep(Number(res.headers.get('retry-after')) * 1000 || 1000 * 2 ** i);
+        continue;
+      }
     }
     const body = await res.json().catch(() => ({}));
     return unwrap(res.status, body);
@@ -392,6 +396,11 @@ export async function fetchInwardReturn(ctx: ClientContext, kind: 'gstr2a' | 'gs
 /* ---------- returns as GSTN holds them (download centre) ---------- */
 
 /** GSTR-1 sections fetched one by one and joined into one GSTN-format GSTR-1 JSON. */
+const SECTION_NAME: Record<string, string> = {
+  b2ba: 'amended B2B invoices', b2cla: 'amended B2C large invoices', b2csa: 'amended B2C small', cdnra: 'amended credit/debit notes (registered)',
+  cdnura: 'amended credit/debit notes (unregistered)', expa: 'amended exports', at: 'advances received', ata: 'amended advances received',
+  txp: 'advance adjustments', txpa: 'amended advance adjustments', 'doc-issue': 'documents issued', nil: 'nil/exempt/non-GST supplies',
+};
 const GSTR1_SECTIONS = ['b2b', 'b2ba', 'b2cl', 'b2cla', 'b2cs', 'b2csa', 'cdnr', 'cdnra', 'cdnur', 'cdnura', 'exp', 'expa', 'at', 'ata', 'txp', 'txpa', 'hsn', 'nil', 'doc-issue'] as const;
 
 /**
@@ -418,7 +427,10 @@ export async function fetchGstr1(ctx: ClientContext, fp: string): Promise<{ json
         // "No invoices/data found" comes back as an error code – it only means the section is empty.
         if (/no (invoice|data|record|document)s?|not found|does not exist/i.test(e.message) || (e.code && NO_DATA.has(e.code))) { ok++; continue; }
         failed ??= e;
-        notes.push(`${s.toUpperCase()}: ${e.message}${e.code ? ` (${e.code})` : ''}`);
+        const what = `${s.toUpperCase()}${SECTION_NAME[s] ? ` (${SECTION_NAME[s]})` : ''}`;
+        notes.push(/source unavailable/i.test(e.message)
+          ? `${what} is not available from GSTN’s API (Source unavailable) – the rest of GSTR-1 is complete. If this table was used, check it on the GST portal.`
+          : `${what} could not be downloaded: ${e.message}${e.code ? ` (${e.code})` : ''} – the rest of GSTR-1 is complete; download again to retry.`);
       }
     }
     if (!ok && failed) throw failed;

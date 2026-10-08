@@ -327,7 +327,7 @@ const AnnualReturnSchema = new Schema(
     status: { type: String, enum: ANNUAL_STATUSES, default: 'draft' },
     /** { v, lists, text } – see src/server/gst/annual/common.ts. */
     form: Mixed,
-    formSource: { type: String, enum: ['auto', 'manual', 'excel', 'json'] },
+    formSource: { type: String, enum: ['auto', 'manual', 'excel', 'json', 'portal'] },
     formUpdatedAt: Date,
     formUpdatedBy: String,
     /** What the last auto-fill or import could not do – shown until the next one. */
@@ -440,6 +440,8 @@ const PortalFetchSchema = new Schema(
     fetchedBy: String,
     /** Set when the data was also added to Client documents. */
     clientDocId: ObjectId,
+    /** What happened to the app's own form (GSTR-1, GSTR-3B, GSTR-9) for this period. */
+    form: { state: String, note: String, link: String },
   },
   ts,
 );

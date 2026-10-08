@@ -112,7 +112,7 @@ async function sourceMonths(auth: Auth, company: CompanyDoc, fy: string) {
 
 /* ---------- prepare ---------- */
 
-async function setForm(auth: Auth, doc: AnnualReturnDoc, form: AnnualForm, source: 'auto' | 'manual' | 'excel' | 'json', notes?: string[]) {
+async function setForm(auth: Auth, doc: AnnualReturnDoc, form: AnnualForm, source: 'auto' | 'manual' | 'excel' | 'json' | 'portal', notes?: string[]) {
   const set: Record<string, unknown> = { form, formSource: source, formUpdatedAt: new Date(), formUpdatedBy: auth.email };
   if (notes) set.notes = notes;
   await AnnualReturn.updateOne({ _id: doc._id, status: 'draft' }, { $set: set });
@@ -280,4 +280,33 @@ export async function reopen(auth: Auth, kind: string, companyId: string, fy: st
   );
   await log(auth, doc, 'reopen', { reason: reason.slice(0, 200), arn: doc.filed?.arn });
   return { ok: true };
+}
+
+/* ---------- downloaded from the GST portal ---------- */
+
+/**
+ * GSTR-9 as GSTN holds it, into the form: when the form is still blank, when GSTN lists the return as
+ * filed (then it is locked as filed, with GSTN's ARN), or when the user asks to replace their own data.
+ */
+export async function fillGstr9FromPortal(auth: Auth, companyId: string, fy: string, json: unknown, opts: { filing?: { arn: string; filedOn: Date | null }; replace?: boolean }) {
+  const { doc } = await loadDoc(auth, 'gstr9', companyId, fy);
+  const link = `/gstr9?companyId=${companyId}&fy=${fy}`;
+  if (doc.status === 'filed') return { state: 'locked' as const, note: 'Already marked filed here – not changed.', link };
+  const res = fromGstr9Json(json);
+  // A form loaded from GSTN earlier is refreshed; one the user prepared is protected.
+  const has = !!doc.form && !isBlank(normalizeGstr9(doc.form)) && doc.formSource !== 'portal';
+  if (has && !opts.filing && !opts.replace) return { state: 'kept' as const, note: 'The GSTR-9 form already has your data – not replaced. Use “Load into form” to replace it.', link };
+  if (!res.read && !opts.filing) return { state: 'skipped' as const, note: 'GSTN has no GSTR-9 saved for this year yet.', link };
+  if (res.read) await setForm(auth, doc, res.form, 'portal', [`Loaded from the GST portal on ${new Date().toLocaleDateString('en-IN')}.`]);
+  if (opts.filing) {
+    const arn = opts.filing.arn.toUpperCase();
+    await AnnualReturn.updateOne({ _id: doc._id, status: 'draft' }, {
+      $set: { status: 'filed', filed: { arn, filedOn: opts.filing.filedOn ?? new Date(), recordedAt: new Date(), recordedBy: `${auth.email} (from GSTN)` } },
+      $push: { history: { at: new Date(), from: 'draft', to: 'filed', note: `Filed on GSTN, ARN ${arn} (downloaded from the GST portal)`, byEmail: auth.email } },
+    });
+    await log(auth, doc, 'portal_filed', { arn });
+    return { state: 'filed' as const, note: `Filed on GSTN (ARN ${arn}) – the form shows the filed return and is locked.`, link };
+  }
+  await log(auth, doc, 'portal_load', { tables: res.read });
+  return { state: 'filled' as const, note: `${res.read} table(s) loaded into the GSTR-9 form.`, link };
 }

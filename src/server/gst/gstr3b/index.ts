@@ -126,8 +126,10 @@ async function storeLedger(doc: Gstr3bDoc, inner: unknown) {
 export async function overview(auth: Auth, companyId: string, fp: string) {
   const { company, doc, ctx } = await load(auth, companyId, fp);
   const client = getGstClient();
-  const form = doc?.form ? normalizeForm(doc.form) : null;
   const portalForm = doc?.portalForm ? normalizeForm(doc.portalForm) : null;
+  // Once filed, the return is what GSTN holds – which may differ from a draft prepared here.
+  const filedForm = doc && status(doc) === 'filed' && portalForm && !isNilForm(portalForm) ? portalForm : null;
+  const form = filedForm ?? (doc?.form ? normalizeForm(doc.form) : null);
   const tx = (doc?.portalDetails as { tx_pmt?: Record<string, unknown> } | undefined)?.tx_pmt;
   return {
     company: { _id: String(company._id), name: company.name, gstin: company.gstin },

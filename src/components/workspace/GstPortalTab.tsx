@@ -209,12 +209,21 @@ export function GstPortalTab({ d, onChanged, onGoto }: { d: ReturnDetail; onChan
       </form>
     );
   } else if (s === 'filed') {
-    body = <Notice tone="ok">Filed. ARN <span className="num">{o.portal.arn}</span>{o.portal.filedOn ? ` on ${new Date(o.portal.filedOn).toLocaleDateString('en-IN')}` : ''}.</Notice>;
+    body = (
+      <Notice tone="ok">
+        Filed{o.portal.filedVia === 'gstn-download' ? ' on the GST portal (outside this app)' : ''}. ARN <span className="num">{o.portal.arn}</span>{o.portal.filedOn ? ` on ${new Date(o.portal.filedOn).toLocaleDateString('en-IN')}` : ''}.
+        {o.portal.filedVia === 'gstn-download' && ' The records are the filed data downloaded from GSTN; the return is locked.'}
+      </Notice>
+    );
   }
 
   return (
     <div className="space-y-6">
-      {apiMode ? (
+      {o.portal.filedVia === 'gstn-download' ? (
+        <Notice>
+          <span className="font-semibold">Filed outside this app.</span> GSTN listed this return as filed when it was downloaded from the GST portal (Downloads → From the GST portal); the ARN and GSTN’s filing record are kept as evidence.
+        </Notice>
+      ) : apiMode ? (
         <Notice>
           <span className="font-semibold">Filed from inside this app through {o.client.label}, an authorised GSP route.</span> You log in with the OTP GSTN sends you; every reference, status, summary and ARN shown here is GSTN’s own response, stored as evidence.
         </Notice>

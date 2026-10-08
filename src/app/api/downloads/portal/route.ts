@@ -3,7 +3,7 @@ import { can } from '@/server/auth';
 import { api, HttpError } from '@/server/http';
 import { requireLicense } from '@/server/license';
 import { endCompanyLogin, requestCompanyLoginOtp, verifyCompanyLoginOtp } from '@/server/gst/gst-login';
-import { deletePortalFetch, fetchFromPortal, PORTAL_TYPES, portalStatus } from '@/server/downloads/portal';
+import { deletePortalFetch, fetchFromPortal, loadIntoForm, PORTAL_TYPES, portalStatus } from '@/server/downloads/portal';
 
 /** GST login, downloads made so far, and whether this installation can download from the portal: ?companyId */
 export const GET = api('return:view', async (req, { auth }) => {
@@ -18,8 +18,9 @@ const Body = z.discriminatedUnion('action', [
   z.object({ action: z.literal('logout'), companyId: z.string().min(1).max(32) }),
   z.object({
     action: z.literal('fetch'), companyId: z.string().min(1).max(32), type: z.enum(PORTAL_TYPES), period: z.string().min(6).max(7),
-    toDocuments: z.boolean().optional(), force: z.boolean().optional(),
+    toDocuments: z.boolean().optional(), force: z.boolean().optional(), fillForms: z.boolean().optional(),
   }),
+  z.object({ action: z.literal('load_form'), id: z.string().min(1).max(32) }),
   z.object({ action: z.literal('delete'), id: z.string().min(1).max(32) }),
 ]);
 
@@ -35,6 +36,7 @@ export const POST = api('return:view', async (req, { auth }) => {
       need('return:edit');
       await requireLicense(auth.orgId, 'gstApi');
       return fetchFromPortal(auth, b);
+    case 'load_form': need('return:edit'); return loadIntoForm(auth, b.id);
     case 'delete': need('return:edit'); return deletePortalFetch(auth, b.id);
   }
 }, { rateLimit: { key: 'portal-download', max: 120, windowMs: 60_000 } });

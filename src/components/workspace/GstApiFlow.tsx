@@ -23,6 +23,8 @@ export interface ApiSummary { evidenceId: string; fetchedAt?: string; fetchedBy?
 export interface ApiPortal {
   uploadReference?: string; processingReference?: string; arn?: string; filedOn?: string;
   proceedReference?: string; proceededAt?: string; summaryEvidenceId?: string; evcRequestedAt?: string; fileSubmittedAt?: string; ackNum?: string;
+  /** "gstn-download" when GSTN listed the return as filed while downloading it from the portal (filed outside this app). */
+  filedVia?: string;
 }
 
 export type Act = (key: string, body: Record<string, unknown>, ok: string | ((r: Record<string, unknown>) => { tone: 'ok' | 'error'; text: string })) => Promise<boolean>;
@@ -302,7 +304,12 @@ export function GstApiFlow(p: FlowProps) {
   }
 
   if (s === 'filed') {
-    return <Notice tone="ok">Filed. ARN <span className="num">{portal.arn}</span>{portal.filedOn ? ` on ${new Date(portal.filedOn).toLocaleDateString('en-IN')}` : ''}.</Notice>;
+    return (
+      <Notice tone="ok">
+        Filed{portal.filedVia === 'gstn-download' ? ' on the GST portal (outside this app)' : ''}. ARN <span className="num">{portal.arn}</span>{portal.filedOn ? ` on ${new Date(portal.filedOn).toLocaleDateString('en-IN')}` : ''}.
+        {portal.filedVia === 'gstn-download' && ' The records are the filed data downloaded from GSTN; the return is locked.'}
+      </Notice>
+    );
   }
   return null;
 }

@@ -123,7 +123,15 @@ export default function Gstr3bPage() {
   const excelInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    call<{ companies: Company[] }>('/api/companies').then((r) => { setCompanies(r.companies); if (r.companies[0]) setCompanyId(r.companies[0]._id); }).catch((e) => setMsg({ tone: 'error', text: e.message }));
+    // Links (e.g. from Downloads): /gstr3b?companyId=…&fp=MMYYYY
+    const u = new URLSearchParams(window.location.search);
+    call<{ companies: Company[] }>('/api/companies').then((r) => {
+      setCompanies(r.companies);
+      const want = u.get('companyId');
+      const c = want && r.companies.some((x) => x._id === want) ? want : r.companies[0]?._id;
+      if (c) setCompanyId(c);
+      if (/^\d{6}$/.test(u.get('fp') ?? '')) setFp(u.get('fp')!);
+    }).catch((e) => setMsg({ tone: 'error', text: e.message }));
   }, []);
 
   const load = useCallback(() => (companyId && /^\d{6}$/.test(fp)
@@ -266,7 +274,8 @@ export default function Gstr3bPage() {
                     <>
                       <p className="text-ink-soft">
                         {o.formSource ? `Started from ${SOURCE_LABEL[o.formSource] ?? o.formSource}` : 'Blank tables'}{o.formUpdatedAt ? `, last changed ${when(o.formUpdatedAt)}${o.formUpdatedBy ? ` by ${o.formUpdatedBy}` : ''}` : ''}.
-                        {!editable && s !== 'draft' && s !== 'saved' && ' Locked: GSTN does not allow changes after the liability is set off.'}
+                        {!editable && s === 'filed' && ' Locked: filed – these are the tables as filed on GSTN.'}
+                        {!editable && s !== 'draft' && s !== 'saved' && s !== 'filed' && ' Locked: GSTN does not allow changes after the liability is set off.'}
                       </p>
                       {excelButtons}
                       <Gstr3bTables form={draft} onChange={editable ? (f) => { setDraft(f); setDirty(true); } : undefined} />

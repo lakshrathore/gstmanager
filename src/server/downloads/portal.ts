@@ -19,6 +19,8 @@ import { normalizeForm } from '../gst/gstr3b/protocol';
 import { upload as uploadClientDocs } from '../docs';
 import { deleteFile, getFile, putFile } from '../docs/storage';
 import { gstr1Workbook } from './gstr1Excel';
+import { gstr1Form, gstr3bForm, gstr9Form, type FormResult } from './forms';
+import { useValues as take3bValues } from '../gst/gstr3b';
 
 /**
  * Download centre, "from the GST portal": returns, ledgers and the filing list as GSTN holds them,
@@ -71,11 +73,14 @@ const ctxOf = (auth: Auth, c: CompanyDoc) => ({ orgId: auth.orgId, companyId: St
 export interface PortalItem {
   id: string; type: PortalType; typeName: string; period: string; count: number; notes: string[];
   fetchedAt: Date; fetchedBy: string | null; inDocuments: boolean; excel: boolean;
+  /** What happened to the app's GSTR-1 / GSTR-3B / GSTR-9 form for this period. */
+  form: FormResult | null;
 }
-type FetchDoc = { _id: Types.ObjectId; type: string; period: string; count?: number | null; notes?: string[]; updatedAt?: Date; fetchedBy?: string | null; clientDocId?: unknown };
+type FetchDoc = { _id: Types.ObjectId; type: string; period: string; count?: number | null; notes?: string[]; updatedAt?: Date; fetchedBy?: string | null; clientDocId?: unknown; form?: { state?: string | null; note?: string | null; link?: string | null } | null };
 const itemOf = (d: FetchDoc): PortalItem => ({
   id: String(d._id), type: d.type as PortalType, typeName: INFO[d.type as PortalType]?.name ?? d.type, period: d.period, count: d.count ?? 0,
   notes: d.notes ?? [], fetchedAt: d.updatedAt ?? new Date(), fetchedBy: d.fetchedBy ?? null, inDocuments: !!d.clientDocId, excel: true,
+  form: d.form?.state ? { state: d.form.state as FormResult['state'], note: d.form.note ?? '', link: d.form.link ?? undefined } : null,
 });
 
 /** The company's GST login, what has been downloaded already, and whether this installation can do it. */
@@ -132,7 +137,10 @@ async function fromGstn(auth: Auth, company: CompanyDoc, type: PortalType, perio
   }
 }
 
-export async function fetchFromPortal(auth: Auth, input: { companyId: string; type: PortalType; period: string; toDocuments?: boolean; force?: boolean }) {
+/** Types whose data also goes into the app's own form for the period. */
+export const FORM_TYPES: PortalType[] = ['gstr1', 'gstr3b', 'gstr9'];
+
+export async function fetchFromPortal(auth: Auth, input: { companyId: string; type: PortalType; period: string; toDocuments?: boolean; force?: boolean; fillForms?: boolean }) {
   const { type, period } = input;
   if (!PORTAL_TYPES.includes(type)) throw new HttpError(400, 'Unknown return type');
   checkPeriod(type, period);
@@ -144,8 +152,18 @@ export async function fetchFromPortal(auth: Auth, input: { companyId: string; ty
   if (existing && !input.force) return { item: itemOf(existing as FetchDoc), skipped: true };
 
   let got;
+  let form: FormResult | undefined;
+  const fill = !!input.fillForms && FORM_TYPES.includes(type);
   try {
-    got = await fromGstn(auth, company, type, period);
+    if (type === 'gstr3b' && fill) {
+      // GSTR-3B's own "get from GSTN" step: details, liability, ledger, filing status – and the form.
+      const r = await gstr3bForm(auth, company, period);
+      got = { json: r.json, count: Object.keys(r.json as object).length ? 1 : 0, notes: r.notes };
+      form = r.result;
+    } else {
+      got = await fromGstn(auth, company, type, period);
+    }
+    if (fill && !form) form = type === 'gstr1' ? await gstr1Form(auth, company, period, got.json) : await gstr9Form(auth, company, period, got.json);
   } catch (e) {
     if (e instanceof GstnSessionError) throw new HttpError(409, 'Not logged in to GST for this client – log in with the OTP above, then download again.', { session: 'expired' });
     if (e instanceof GstnError) gstnHttpError(e);
@@ -167,10 +185,34 @@ export async function fetchFromPortal(auth: Auth, input: { companyId: string; ty
 
   if (existing?.fileId) await deleteFile(existing.fileId as Types.ObjectId).catch(() => undefined);
   const doc = await PortalFetch.findOneAndUpdate(key, {
-    $set: { gstin: company.gstin, fileId, sizeBytes: bytes.length, count: got.count, notes, fetchedBy: auth.email, clientDocId },
+    $set: { gstin: company.gstin, fileId, sizeBytes: bytes.length, count: got.count, notes, fetchedBy: auth.email, clientDocId, ...(form ? { form } : {}) },
   }, { upsert: true, new: true }).lean();
   await audit(auth, 'portal.download', 'Company', String(company._id), { type, period, count: got.count, toDocuments: !!clientDocId });
   return { item: itemOf(doc as FetchDoc), skipped: false };
+}
+
+/** Puts a downloaded return into the app's form, replacing what the user prepared (asked for explicitly). */
+export async function loadIntoForm(auth: Auth, id: string) {
+  const { d, company } = await loadFetch(auth, id);
+  const type = d.type as PortalType;
+  if (!FORM_TYPES.includes(type)) throw new HttpError(400, 'Only GSTR-1, GSTR-3B and GSTR-9 have a form here.');
+  const json = JSON.parse((await getFile(d.fileId as Types.ObjectId)).toString('utf8')) as unknown;
+  let form: FormResult;
+  try {
+    if (type === 'gstr1') form = await gstr1Form(auth, company, d.period, json, { replace: true });
+    else if (type === 'gstr9') form = await gstr9Form(auth, company, d.period, json, { replace: true });
+    else {
+      await take3bValues(auth, String(company._id), d.period, 'portal');
+      form = { state: 'filled', note: 'Tables replaced with the values saved on GSTN.', link: `/gstr3b?companyId=${company._id}&fp=${d.period}` };
+    }
+  } catch (e) {
+    if (e instanceof GstnSessionError) throw new HttpError(409, 'Not logged in to GST for this client – log in with the OTP above, then try again.', { session: 'expired' });
+    if (e instanceof GstnError) gstnHttpError(e);
+    throw e;
+  }
+  const doc = await PortalFetch.findOneAndUpdate({ _id: d._id }, { $set: { form } }, { new: true }).lean();
+  await audit(auth, 'portal.load_form', 'PortalFetch', id, { type, period: d.period, state: form.state });
+  return { item: itemOf(doc as FetchDoc) };
 }
 
 /* ---------- files ---------- */

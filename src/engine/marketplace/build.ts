@@ -35,6 +35,8 @@ export interface SaleLine {
   hsn: string;
   description?: string;
   qty: number;
+  /** GST unit (UQC) of the line when the report has a unit column; else the import's default unit. */
+  uqc?: string;
   /** Total GST rate in percent (IGST, or CGST + SGST). null when not determinable. */
   rate: number | null;
   /** Taxable value as a positive amount; the kind decides the sign. */
@@ -107,10 +109,47 @@ export function rateFromTax(tax: number | null | undefined, taxable: number, all
 
 const money = (n: number) => `₹${round2(n).toLocaleString('en-IN')}`;
 
-/** "FAI1W52400000001" → { prefix: "FAI1W524", n: 1, width: 8 } (the trailing digit run is the counter). */
-function splitDocNo(no: string) {
-  const m = no.match(/^(.*?)(\d+)$/);
-  return m ? { prefix: m[1], n: Number(m[2]), width: m[2].length } : { prefix: no, n: 0, width: 0 };
+/**
+ * The running counter of a document number: "FAI1W52400000001" → prefix "FAI1W524", n 1, width 8 (the
+ * trailing digit run); "122/26-27" or "INV-45/2026-27" → the digits before a financial-year suffix,
+ * which becomes part of the series. width is kept only for zero-padded counters, so 99 → 100 stays
+ * one series.
+ */
+export function splitDocNo(no: string) {
+  const fy = no.match(/^(.*?)(\d+)(\s*[/-]\s*(?:\d{4}|\d{2})\s*-\s*(?:\d{4}|\d{2}))$/);
+  const m = fy ?? no.match(/^(.*?)(\d+)$/);
+  if (!m) return { prefix: no, n: 0, width: 0, head: no, tail: '', digits: '' };
+  const digits = m[2];
+  const tail = fy ? m[3] : '';
+  return { prefix: `${m[1]}#${tail.replace(/\s/g, '')}`, n: Number(digits), width: digits.startsWith('0') ? digits.length : 0, head: m[1], tail, digits };
+}
+
+/** Numbers missing between the first and last of each series (by the running counter; at most 500 per series). */
+export function seriesGaps(numbers: string[]) {
+  const series = new Map<string, { n: number; no: string }[]>();
+  for (const no of new Set(numbers.map((x) => x.trim()).filter(Boolean))) {
+    const d = splitDocNo(no);
+    if (!d.digits) continue;
+    const k = `${d.prefix.toUpperCase()}|${d.width}`;
+    if (!series.has(k)) series.set(k, []);
+    series.get(k)!.push({ n: d.n, no });
+  }
+  const out: { from: string; to: string; missing: string[] }[] = [];
+  for (const list of series.values()) {
+    if (list.length < 2) continue;
+    list.sort((a, b) => a.n - b.n);
+    const have = new Set(list.map((x) => x.n));
+    const first = list[0], last = list[list.length - 1];
+    if (last.n - first.n > 5000) continue;
+    const missing: string[] = [];
+    // Rebuilt from the first number: same text around the counter, zero-padded when it was.
+    const d = splitDocNo(first.no);
+    for (let n = first.n + 1; n < last.n && missing.length < 500; n++) {
+      if (!have.has(n)) missing.push(`${d.head}${d.width ? String(n).padStart(d.width, '0') : n}${d.tail}`);
+    }
+    if (missing.length) out.push({ from: first.no, to: last.no, missing });
+  }
+  return out;
 }
 
 /** Table 13: one row per document series (same prefix + counter width): first, last, count, cancelled. */
@@ -317,13 +356,13 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
   for (const l of lines) {
     const hsn = (l.hsn || '').replace(/\D/g, '');
     if (!hsn) noHsn++;
-    const k = `${hsnSection(l)}|${hsn}|${l.rate}`;
+    const k = `${hsnSection(l)}|${hsn}|${l.uqc || o.uqc}|${l.rate}`;
     if (!hsnGroups.has(k)) hsnGroups.set(k, []);
     hsnGroups.get(k)!.push(l);
   }
   if (noHsn) issue('error', o.hsnSplit ? 'hsn_b2c' : 'hsn_b2b', 'hsn', `${noHsn} line(s) have no HSN code`, { suggestion: 'They are grouped under a blank HSN – edit that HSN line to the correct code.' });
   for (const [k, ls] of hsnGroups) {
-    const [section, hsn] = k.split('|') as ['hsn_b2b' | 'hsn_b2c', string];
+    const [section, hsn, uqc] = k.split('|') as ['hsn_b2b' | 'hsn_b2c', string, string];
     let inter = 0, intra = 0, qty = 0, cess = 0;
     for (const l of ls) {
       const v = sign(l) * l.taxable;
@@ -336,8 +375,8 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
     if (txval === 0 && qty === 0) continue;
     const ti = rt == null ? 0 : round2((inter * rt) / 100);
     const half = rt == null ? 0 : round2((intra * rt) / 200);
-    const data: HsnData = { hsn, desc: ls.find((l) => l.description)?.description?.slice(0, 30), uqc: o.uqc, qty: round2(qty), rt, txval, iamt: ti, camt: half, samt: half, csamt: round2(cess) };
-    records.push({ section, key: `${section}|${hsn}|${o.uqc}|${rt}|${o.source}`, source: src(ls), data } as AnyRecord);
+    const data: HsnData = { hsn, desc: ls.find((l) => l.description)?.description?.slice(0, 30), uqc, qty: round2(qty), rt, txval, iamt: ti, camt: half, samt: half, csamt: round2(cess) };
+    records.push({ section, key: `${section}|${hsn}|${uqc}|${rt}|${o.source}`, source: src(ls), data } as AnyRecord);
   }
 
   // 5. Table 13 – documents issued: the marketplace's document register when given, else the
@@ -350,6 +389,12 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
         ...lines.filter((l) => l.kind === 'return' && l.noteNo).map((l) => ({ type: 'credit' as const, number: l.noteNo! })),
       ];
   records.push(...docRecords(docs, o.source));
+  // Numbers missing inside a series are usually cancelled (or not in the report) – Table 13 must count them.
+  for (const g of seriesGaps(docs.filter((d) => d.type === 'invoice').map((d) => d.number))) {
+    issue('warning', 'docs', 'cancel', `${g.missing.length} invoice number(s) missing between ${g.from} and ${g.to}: ${g.missing.slice(0, 10).join(', ')}${g.missing.length > 10 ? ' …' : ''}`, {
+      suggestion: 'If these bills were cancelled, edit the Documents issued (Table 13) row: total number including them and the cancelled count. If they are missing from the report, export it again.',
+    });
+  }
 
   // 6. summary
   summary.salesTaxable = round2(summary.salesTaxable);

@@ -1,4 +1,5 @@
 import type { SheetTable } from '../excel/parseGstr1';
+import { UQC_CODES } from '../masters';
 import { norm, parseDate, parseNumber } from '../util';
 import { normaliseRate, rateFromTax, type DocLine, type LineKind, type SaleLine } from './build';
 import { stateCode } from './states';
@@ -14,7 +15,7 @@ export const MARKETPLACES: Record<MarketplaceId, { label: string }> = {
   amazon: { label: 'Amazon' },
   flipkart: { label: 'Flipkart' },
   meesho: { label: 'Meesho' },
-  generic: { label: 'Other / sales register' },
+  generic: { label: 'Sales register (billing software)' },
 };
 
 type Get = (key: string) => unknown;
@@ -42,6 +43,22 @@ export function dateOf(v: unknown): string | undefined {
   if (v instanceof Date || typeof v === 'number') return parseDate(v) ?? undefined;
   const s = String(v).trim();
   return parseDate(s) ?? parseDate(s.split(/[ T]/)[0]) ?? undefined;
+}
+
+/** A unit as billing software writes it ("Nos", "Box", "Strip", "Bottle", "Kg") → GST UQC; undefined if not known. */
+const UNIT_ALIASES: Record<string, string> = {
+  NO: 'NOS', NOS: 'NOS', NUMBER: 'NOS', NUMBERS: 'NOS', NUM: 'NOS', UNIT: 'UNT', UNITS: 'UNT', PC: 'PCS', PCS: 'PCS', PIECE: 'PCS', PIECES: 'PCS',
+  BOXES: 'BOX', BOTTLE: 'BTL', BOTTLES: 'BTL', BOTL: 'BTL', TAB: 'TBS', TABS: 'TBS', TABLET: 'TBS', TABLETS: 'TBS', KG: 'KGS', KGS: 'KGS', KILO: 'KGS',
+  G: 'GMS', GM: 'GMS', GMS: 'GMS', GRAM: 'GMS', GRAMS: 'GMS', L: 'LTR', LT: 'LTR', LTR: 'LTR', LITRE: 'LTR', LITRES: 'LTR', LITER: 'LTR', ML: 'MLT',
+  M: 'MTR', MTR: 'MTR', METER: 'MTR', METRE: 'MTR', PKT: 'PAC', PACK: 'PAC', PACKET: 'PAC', PACKS: 'PAC', DOZEN: 'DOZ', PAIR: 'PRS', PAIRS: 'PRS',
+  CARTON: 'CTN', CARTONS: 'CTN', ROLL: 'ROL', ROLLS: 'ROL', TUBE: 'TUB', TUBES: 'TUB', BAGS: 'BAG', SETS: 'SET', TON: 'TON', TONNE: 'TON', QUINTAL: 'QTL',
+  STRIP: 'OTH', STRIPS: 'OTH', VIAL: 'NOS', VIALS: 'NOS', AMP: 'NOS', AMPOULE: 'NOS', JAR: 'NOS', CAN: 'CAN', DRUM: 'DRM',
+};
+export function uqcOf(v: unknown): string | undefined {
+  const u = str(v).toUpperCase().replace(/[^A-Z]/g, '');
+  if (!u) return undefined;
+  if (UNIT_ALIASES[u]) return UNIT_ALIASES[u];
+  return UQC_CODES[u] ? u : undefined;
 }
 
 /** HSN as digits; numbers from Excel keep their value (leading zeros cannot be recovered). */
@@ -224,12 +241,14 @@ const GENERIC: FormatDef = {
     invoiceDate: ['invoice date', 'date', 'bill date', 'voucher date', 'document date'],
     noteNo: ['credit note no', 'credit note number', 'cn no', 'return no'],
     noteDate: ['credit note date', 'cn date', 'return date'],
-    buyerGstin: ['customer gstin', 'buyer gstin', 'gstin of recipient', 'party gstin', 'recipient gstin', 'gstin'],
-    buyerName: ['customer name', 'buyer name', 'party name', 'receiver name'],
+    buyerGstin: ['customer gstin', 'buyer gstin', 'gstin of recipient', 'party gstin', 'recipient gstin', 'gstin', 'gst no', 'gst no.', 'gst number', 'gstin no', 'gstin/uin', 'party gst no'],
+    buyerName: ['customer name', 'buyer name', 'party name', 'receiver name', 'ledger name', 'party', 'customer', 'ledger'],
     state: ['place of supply', 'pos', 'state', 'customer state', 'ship to state', 'delivery state', 'state of supply'],
     hsn: ['hsn', 'hsn code', 'hsn/sac', 'hsn sac', 'sac'],
     description: ['item', 'item name', 'product', 'description', 'product name'],
     qty: ['qty', 'quantity', 'units'],
+    freeQty: ['free qty', 'free quantity', 'scheme qty', 'bonus qty'],
+    unit: ['unit', 'uqc', 'uom', 'unit of measure', 'qty unit'],
     rate: ['gst rate', 'rate', 'tax rate', 'gst %', 'gst', 'rate %'],
     taxable: ['taxable value', 'taxable amount', 'taxable', 'assessable value', 'net amount'],
     igst: ['igst', 'igst amount'],
@@ -240,18 +259,26 @@ const GENERIC: FormatDef = {
   },
   toLine(get, ctx) {
     const type = str(get('type')).toLowerCase();
-    const kind: LineKind = /return|credit|refund|cn\b/.test(type) ? 'return' : /cancel/.test(type) ? 'skip' : 'sale';
+    // A separate sale-return / credit-note report (same columns, positive amounts) is recognised by its
+    // sheet or file name, or by a filled credit-note number.
+    const returnReport = !type && (/return|credit\s*note|\bcn\b/i.test(`${ctx.sheet} ${ctx.file}`) || !!str(get('noteNo')));
+    const named: LineKind = /return|credit|refund|cn\b/.test(type) || returnReport ? 'return' : /cancel/.test(type) ? 'skip' : 'sale';
     const taxable = num(get('taxable'));
+    const kind: LineKind = named === 'sale' && taxable < 0 ? 'return' : named;
     const reportedTax = Math.abs(num(get('igst'))) + Math.abs(num(get('cgst'))) + Math.abs(num(get('sgst')));
     const rate = normaliseRate(parseNumber(get('rate')), ctx.allowedRates) ?? rateFromTax(reportedTax || null, taxable, ctx.allowedRates);
     return line({
-      file: ctx.file, row: ctx.row, kind: kind === 'sale' && taxable < 0 ? 'return' : kind, skipReason: kind === 'skip' ? 'Cancelled' : undefined,
+      file: ctx.file, row: ctx.row, kind, skipReason: kind === 'skip' ? 'Cancelled' : undefined,
       sellerGstin: str(get('sellerGstin')).toUpperCase() || undefined,
       invoiceNo: str(get('invoiceNo')) || undefined, invoiceDate: dateOf(get('invoiceDate')),
-      noteNo: str(get('noteNo')) || undefined, noteDate: dateOf(get('noteDate')),
+      // In a return report the bill number is the credit note's own number.
+      noteNo: str(get('noteNo')) || (kind === 'return' ? str(get('invoiceNo')) : '') || undefined,
+      noteDate: dateOf(get('noteDate')) ?? (kind === 'return' ? dateOf(get('invoiceDate')) : undefined),
       buyerGstin: str(get('buyerGstin')).toUpperCase() || undefined, buyerName: str(get('buyerName')) || undefined,
       pos: stateCode(get('state')), posRaw: str(get('state')), hsn: hsnOf(get('hsn')), description: str(get('description')) || undefined,
-      qty: Math.abs(num(get('qty'))), rate, taxable: Math.abs(taxable), reportedTax: reportedTax || undefined, cess: Math.abs(num(get('cess'))) || undefined,
+      // Free (scheme) quantity is supplied too, so it counts in the HSN quantity.
+      qty: Math.abs(num(get('qty'))) + Math.abs(num(get('freeQty'))), uqc: uqcOf(get('unit')),
+      rate, taxable: Math.abs(taxable), reportedTax: reportedTax || undefined, cess: Math.abs(num(get('cess'))) || undefined,
     });
   },
 };
@@ -266,10 +293,13 @@ function mapHeader(table: SheetTable, def: FormatDef) {
   for (let r = 0; r < limit; r++) {
     const cells = (table.rows[r] ?? []).map(norm);
     const map = new Map<string, number>();
+    // Aliases are in order of preference: with both "GST Rate" and "Rate" (the price) in the sheet,
+    // the rate is read from "GST Rate".
     for (const [key, aliases] of Object.entries(def.columns)) {
-      const wanted = aliases.map(norm);
-      const idx = cells.findIndex((c) => c && wanted.includes(c));
-      if (idx >= 0) map.set(key, idx);
+      for (const a of aliases) {
+        const idx = cells.findIndex((c) => c && c === norm(a));
+        if (idx >= 0) { map.set(key, idx); break; }
+      }
     }
     if (def.signature.every((k) => map.has(k))) return { rowIdx: r, map };
   }

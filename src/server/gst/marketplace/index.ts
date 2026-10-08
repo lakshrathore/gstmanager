@@ -85,7 +85,8 @@ export async function importMarketplace(
     hsnSplit: ctx.profile.hsnSplit, b2clThreshold: ctx.profile.b2clThreshold, allowedRates: ctx.profile.allowedRates, etin, uqc,
   }, docs);
   if (!built.records.length) throw new HttpError(422, `No lines for ${company.gstin} in these files (${built.summary.otherGstinLines} line(s) are for other GSTINs)`);
-  if (!etin) {
+  // Own billing software: sales through no e-commerce operator, so no Type E reminder.
+  if (!etin && marketplace !== 'generic') {
     built.issues.push({
       code: 'MP_ETIN', severity: 'warning', section: 'b2cs', recordKey: '', sheet: source, field: 'etin',
       message: `No e-commerce operator GSTIN given – ${MARKETPLACES[marketplace].label} B2C sales are reported as your own sales (Type OE)`,

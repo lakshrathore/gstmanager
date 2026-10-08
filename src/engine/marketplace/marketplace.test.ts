@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { R_KA, R_MH, SUPPLIER } from '../../../scripts/sample-workbook';
 import {
-  buildMarketplaceRecords, generateGstr1Json, gstinCheckDigit, parseCsv, profileForPeriod, readMarketplaceTables,
+  buildMarketplaceRecords, generateGstr1Json, seriesGaps, gstinCheckDigit, parseCsv, profileForPeriod, readMarketplaceTables,
   stateCode, validateGstr1Json, validateReturn, type AnyRecord, type BuildOptions, type ReturnContext, type SheetTable,
 } from '../index';
 
@@ -234,5 +234,65 @@ describe('generic sales register and merging sources', () => {
     const hsn = (json.hsn as { hsn_b2c: { hsn_sc: string; txval: number; qty: number }[] }).hsn_b2c;
     expect(hsn).toEqual([expect.objectContaining({ hsn_sc: '6204', txval: 1500, qty: 3 })]);
     expect(validateGstr1Json(json).ok).toBe(true);
+  });
+
+  it('reads an item-wise billing-software sale report (Ledger Name, GST No, GST Rate vs Rate, Unit, Free Qty)', () => {
+    const head = ['S.No', 'Ledger Name', 'Bill No', 'Bill Date', 'Place of Supply', 'GST No', 'Category', 'Item Name', 'GST Rate', 'Bar Code', 'HSN', 'ItemCode', 'Batch No',
+      'Packing Style', 'MFG Date', 'EXP Date', 'MRP', 'Qty', 'Unit', 'Free Qty', 'Free Qty Unit', 'Rate', 'Item line Total', 'Discount', 'Bill Discount(%)',
+      'Bill Discount Amount', 'Taxable Amount', 'IGST', 'CGST', 'SGST/UTGST', 'Tax Amount', 'Sub Total Amount', 'Bill Amount', 'Cost Rate', 'Item Profit'];
+    const row = (n: number, ledger: string, bill: string, date: string, pos: string, gst: string, item: string, rate: number, hsn: string, qty: number, unit: string, free: number, price: number, taxable: number, igst: number, half: number) =>
+      [n, ledger, bill, date, pos, gst, 'Tablet', item, rate, '0571358104', hsn, 'X', 'B1', '10X10', '06/2026', '05/2028', 297, qty, unit, free.toFixed(2), '', price, taxable, 0, 0, 0, taxable, igst, half, half, igst + 2 * half, taxable + igst + 2 * half, 0, 21, 0];
+    const t: SheetTable = { name: 'Sale Report', rows: [head,
+      row(1, 'New Sanju Medical Store', '122/26-27', '03-06-2025', 'Karnataka', '', 'Progycure-500', 5, '30049099', 50, 'NOS', 0, 50, 2500, 0, 62.5),
+      row(2, 'Divine Healthcare', '123/26-27', '03-06-2025', 'Maharashtra', '', 'Potadi Clave -625', 5, '3004', 4, 'BOX', 1, 540, 2160, 108, 0),
+      row(3, 'Divine Healthcare', '123/26-27', '03-06-2025', 'Maharashtra', '', 'Deparadol -SP', 5, '3004', 19, 'BOX', 0, 130, 2470, 123.5, 0),
+      row(4, 'Divine Healthcare', '126/26-27', '04-06-2025', 'Maharashtra', '', 'Tacillin-4.5 Gm', 5, '30041090', 1620, 'NOS', 0, 65, 105300, 5265, 0),
+      row(5, 'H D B P Hospital', '127/26-27', '05-06-2025', 'Maharashtra', R_MH, 'PROXONE-1GM', 12, '3004', 300, 'Nos', 0, 22.5, 6750, 810, 0),
+      row(6, 'H D B P Hospital', '127/26-27', '05-06-2025', 'Maharashtra', R_MH, 'Pinset-40', 5, '3004', 350, 'Nos', 0, 12.5, 4375, 218.75, 0),
+    ] };
+    const r = readMarketplaceTables([t], 'sale-report.xlsx', 'auto', profile.allowedRates);
+    expect(r.marketplace).toBe('generic');
+    // "GST Rate" (5/12) is the rate – not "Rate" (the selling price).
+    expect(r.lines.map((l) => l.rate)).toEqual([5, 5, 5, 5, 12, 5]);
+    expect(r.lines[1]).toMatchObject({ buyerName: 'Divine Healthcare', uqc: 'BOX', qty: 5, pos: '27' });
+    const out = buildMarketplaceRecords(r.lines, opts('generic'));
+
+    // B2B: one invoice to the registered hospital, items by rate.
+    const b2b = of(out.records, 'b2b');
+    expect(b2b).toHaveLength(1);
+    expect(b2b[0].data).toMatchObject({ ctin: R_MH, inum: '127/26-27', receiverName: 'H D B P Hospital' });
+    expect((b2b[0].data as { items: { rt: number; txval: number }[] }).items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rt: 12, txval: 6750, iamt: 810 }), expect.objectContaining({ rt: 5, txval: 4375 })]));
+    // B2CL: the inter-state bill above ₹1 lakh; the rest is B2CS by state and rate.
+    expect(of(out.records, 'b2cl').map((x) => x.data)).toEqual([expect.objectContaining({ inum: '126/26-27', pos: '27' })]);
+    expect(of(out.records, 'b2cs').map((x) => x.data)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pos: '29', rt: 5, txval: 2500, camt: 62.5 }), expect.objectContaining({ pos: '27', rt: 5, txval: 4630, iamt: 231.5 })]));
+    // HSN summary by HSN, unit and rate; free quantity counted.
+    const hsn = [...of(out.records, 'hsn_b2c'), ...of(out.records, 'hsn_b2b')].map((x) => x.data as { hsn: string; uqc: string; qty: number; rt: number });
+    expect(hsn).toEqual(expect.arrayContaining([expect.objectContaining({ hsn: '3004', uqc: 'BOX', qty: 24, rt: 5 }), expect.objectContaining({ hsn: '30049099', uqc: 'NOS', qty: 50 })]));
+    // Table 13 from the bill numbers.
+    expect(of(out.records, 'docs').map((x) => x.data)).toEqual([expect.objectContaining({ from: '122/26-27', to: '127/26-27', totnum: 4 })]);
+    // Missing bill numbers are flagged for Table 13.
+    expect(out.issues.find((i) => i.section === 'docs')?.message).toContain('124/26-27, 125/26-27');
+    expect(seriesGaps(['INV0001', 'INV0004', 'X-9', 'X-10'])).toEqual([{ from: 'INV0001', to: 'INV0004', missing: ['INV0002', 'INV0003'] }]);
+    const { json } = generateGstr1Json(out.records, ctx);
+    expect(validateGstr1Json(json).ok).toBe(true);
+
+    // The same software's Sale Return report: B2C returns net off B2C Small (never Table 9B), a
+    // registered buyer's return is a credit note (9B registered).
+    const ret: SheetTable = { name: 'Sale Return Report', rows: [head,
+      row(1, 'New Sanju Medical Store', 'SR-9', '08-06-2025', 'Karnataka', '', 'Progycure-500', 5, '30049099', 5, 'NOS', 0, 50, 250, 0, 6.25),
+      row(2, 'Divine Healthcare', 'SR-10', '09-06-2025', 'Maharashtra', '', 'Deparadol -SP', 5, '3004', 2, 'BOX', 0, 130, 260, 13, 0),
+      row(3, 'H D B P Hospital', 'SR-11', '09-06-2025', 'Maharashtra', R_MH, 'PROXONE-1GM', 12, '3004', 10, 'Nos', 0, 22.5, 225, 27, 0),
+    ] };
+    const r2 = readMarketplaceTables([t, ret], 'sale-report.xlsx', 'auto', profile.allowedRates);
+    expect(r2.lines.filter((l) => l.kind === 'return').map((l) => l.noteNo)).toEqual(['SR-9', 'SR-10', 'SR-11']);
+    const out2 = buildMarketplaceRecords(r2.lines, opts('generic'));
+    expect(of(out2.records, 'cdnur')).toHaveLength(0);
+    expect(of(out2.records, 'b2cs').map((x) => x.data)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pos: '29', txval: 2250 }), expect.objectContaining({ pos: '27', txval: 4370 })]));
+    expect(of(out2.records, 'cdnr').map((x) => x.data)).toEqual([expect.objectContaining({ ctin: R_MH, ntNum: 'SR-11', ntty: 'C' })]);
+    expect(of(out2.records, 'docs').map((x) => (x.data as { docTyp: string }).docTyp)).toContain('Credit Note');
+    expect(validateGstr1Json(generateGstr1Json(out2.records, ctx).json).ok).toBe(true);
   });
 });

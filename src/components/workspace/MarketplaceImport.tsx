@@ -23,7 +23,7 @@ const HELP: Record<string, string> = {
   amazon: 'Seller Central → Reports → Tax Document Library → MTR (B2C and B2B). Upload both CSVs together.',
   flipkart: 'Seller Hub → Reports → Tax reports → Sales report (.xlsx).',
   meesho: 'Supplier Panel → Payments → GST report (ZIP). Extract it and upload tcs_sales.xlsx and tcs_sales_return.xlsx together.',
-  generic: 'Any sales register with columns for invoice no., date, state, HSN, rate and taxable value (optional: customer GSTIN, type Sale/Return).',
+  generic: 'The item-wise sale report of your billing software: one row per item with bill no., bill date, place of supply, GST rate, HSN and taxable amount (also read: GST No / customer GSTIN, ledger/party name, unit, free qty, IGST/CGST/SGST, Sale/Return type). B2B, B2C large, B2C small, HSN summary and documents issued are built from it.',
 };
 
 export function MarketplaceImport({ d, locked, onDone }: { d: ReturnDetail; locked: boolean; onDone: () => void }) {
@@ -60,20 +60,20 @@ export function MarketplaceImport({ d, locked, onDone }: { d: ReturnDetail; lock
   }
 
   return (
-    <Panel title="Marketplace sales reports – Amazon, Flipkart, Meesho & others">
+    <Panel title="Sales reports – your billing software, Amazon, Flipkart, Meesho">
       {locked ? <p className="text-ink-soft">Import is locked for this return.</p> : (
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <label>Marketplace
+            <label>Report
               <select value={mp} onChange={(e) => setMp(e.target.value)}>
                 <option value="auto">Detect automatically</option>
                 {Object.entries(MARKETPLACES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </label>
-            <label className="lg:col-span-2">Marketplace TCS GSTIN for your state (recommended)
+            {mp !== 'generic' && <label className="lg:col-span-2">Marketplace TCS GSTIN for your state (recommended)
               <input value={etin} onChange={(e) => setEtin(e.target.value.toUpperCase())} maxLength={15} className="num uppercase" placeholder="e.g. 27AAxxxxxxxx1ZC – on the TCS credit in GSTR-2A" />
-            </label>
-            <label>Unit for HSN summary
+            </label>}
+            <label>Unit for HSN summary <span className="font-normal">(when the file has no Unit column)</span>
               <select value={uqc} onChange={(e) => setUqc(e.target.value)}>
                 {Object.entries(UQC_CODES).map(([k, v]) => <option key={k} value={k}>{k} – {v}</option>)}
               </select>

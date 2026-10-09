@@ -7,7 +7,7 @@ import type { Auth } from '../../auth';
 import { HttpError } from '../../http';
 import { GeneratedJson, GstReturn, Gstr1Error, Gstr1Record } from '../../models';
 import { auditReturn } from '../gst-audit';
-import { contextFor, loadReturn, revalidate } from '../gstr1';
+import { contextFor, loadReturn, OTHER_SOURCES, revalidate } from '../gstr1';
 import { changeStatus, DATA_LOCKED, normalizeStatus, STATUS_LABELS } from '../gst-status';
 
 /**
@@ -94,13 +94,30 @@ export async function importMarketplace(
     });
   }
 
-  // Replace this marketplace's previous import; everything else in the return stays.
+  // Replace this marketplace's previous import; everything else in the return stays – except a GSTR-1
+  // Excel import holding the same invoices/notes (typically this report's own Excel download imported
+  // back): the report replaces it, otherwise every document would be in the return twice.
   const base = { orgId: ret.orgId, returnId: ret._id };
+  const docKey = (section: string, d: { inum?: string; ntNum?: string }) => `${section}|${String(d.inum ?? d.ntNum ?? '').trim().toUpperCase()}`;
+  const DOC_SECTIONS = ['b2b', 'b2cl', 'exp', 'cdnr', 'cdnur'];
+  const incoming = new Set(built.records.filter((r) => DOC_SECTIONS.includes(r.section)).map((r) => docKey(r.section, r.data as { inum?: string; ntNum?: string })));
+  const fromExcel = incoming.size
+    ? await Gstr1Record.find({ ...base, section: { $in: DOC_SECTIONS }, 'source.sheet': { $not: OTHER_SOURCES } }).select({ section: 1, data: 1 }).lean()
+    : [];
+  const replacesExcel = fromExcel.some((r) => incoming.has(docKey(r.section, r.data as { inum?: string; ntNum?: string })));
+  const ours = (field: string) => (replacesExcel ? { $or: [{ [field]: source }, { [field]: { $not: OTHER_SOURCES } }] } : { [field]: source });
   await Promise.all([
-    Gstr1Record.deleteMany({ ...base, 'source.sheet': source }),
-    Gstr1Error.deleteMany({ ...base, origin: 'import', sheet: source }),
+    Gstr1Record.deleteMany({ ...base, ...ours('source.sheet') }),
+    Gstr1Error.deleteMany({ ...base, origin: 'import', ...ours('sheet') }),
     GeneratedJson.deleteMany(base),
   ]);
+  if (replacesExcel) {
+    built.issues.push({
+      code: 'IMPORT_REPLACED_EXCEL', severity: 'warning', section: 'b2b', recordKey: '', sheet: source, field: 'source',
+      message: `The GSTR-1 Excel imported earlier has the same invoices as this ${MARKETPLACES[marketplace].label} report – it was replaced by the report`,
+      suggestion: 'Nothing to do if that Excel was this return’s own download. Manual entries and other sales-report imports are kept.',
+    });
+  }
   for (let i = 0; i < built.records.length; i += 1000) {
     await Gstr1Record.insertMany(built.records.slice(i, i + 1000).map((r) => ({ ...base, section: r.section, key: r.key, source: r.source, data: r.data })), { ordered: false });
   }

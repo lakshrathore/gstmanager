@@ -390,4 +390,17 @@ describe('generic sales register and merging sources', () => {
     expect(strip(generateGstr1Json(back.records, ctx).json)).toEqual(strip(generateGstr1Json(built, ctx).json));
     expect(validateReturn(back.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
   });
+
+  it('gives each row of a repeated HSN its own description (the offline tool keys HSN + Description)', async () => {
+    const hsn = (uqc: string, desc?: string): AnyRecord => ({
+      section: 'hsn_b2c', key: `hsn_b2c|3004|${uqc}|5`, source: 'x',
+      data: { hsn: '3004', desc, uqc, qty: 1, rt: 5, txval: 100, iamt: 0, camt: 2.5, samt: 2.5, csamt: 0 },
+    } as unknown as AnyRecord);
+    const wb = new ExcelJS.Workbook();
+    addTemplateSheets(wb, [hsn('NOS', 'PROXONE-1GM'), hsn('BTL', 'PROXONE-1GM'), hsn('BOX'), hsn('PCS', 'A very long product description over thirty')]);
+    const descs = wb.getWorksheet('hsn(b2c)')!.getColumn(2).values.slice(5) as string[];
+    expect(new Set(descs.map((d) => d.toUpperCase())).size).toBe(4);
+    expect(descs.every((d) => d.length <= 30)).toBe(true);
+    expect(descs[0]).toBe('PROXONE-1GM NOS 5%');
+  });
 });

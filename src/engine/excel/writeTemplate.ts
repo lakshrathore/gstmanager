@@ -46,6 +46,28 @@ function rowsOf(r: AnyRecord): Record<string, unknown>[] {
   return items?.length ? items.map((it) => ({ ...head, ...it })) : [head];
 }
 
+/**
+ * GSTN's offline tool keys HSN rows by HSN + Description: two rows of one HSN (another UQC or rate)
+ * with the same or no description overwrite each other on import. Such rows get a description
+ * unique within the sheet (its UQC / rate added, at most 30 characters).
+ */
+function uniqueHsnDescs(rows: Record<string, unknown>[]) {
+  const count = new Map<string, number>();
+  for (const x of rows) count.set(String(x.hsn), (count.get(String(x.hsn)) ?? 0) + 1);
+  const seen = new Set<string>();
+  for (const x of rows) {
+    const hsn = String(x.hsn);
+    if ((count.get(hsn) ?? 0) < 2) continue;
+    const base = String(x.desc ?? '').trim();
+    for (let i = 0; ; i++) {
+      const tag = [x.uqc, x.rt != null ? `${x.rt}%` : '', i ? String(i + 1) : ''].filter(Boolean).join(' ');
+      const desc = base ? `${base.slice(0, Math.max(1, 29 - tag.length))} ${tag}`.slice(0, 30) : tag.slice(0, 30);
+      const k = `${hsn}|${desc.toUpperCase()}`;
+      if (!seen.has(k)) { seen.add(k); x.desc = desc; break; }
+    }
+  }
+}
+
 /** Adds the template sheets for these records to the workbook (sections without records are left out). */
 export function addTemplateSheets(wb: ExcelJS.Workbook, records: AnyRecord[]) {
   for (const def of SHEETS) {
@@ -60,11 +82,11 @@ export function addTemplateSheets(wb: ExcelJS.Workbook, records: AnyRecord[]) {
     header.font = { bold: true };
     header.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2F0EC' } }; });
     ws.views = [{ state: 'frozen', ySplit: 4 }];
-    for (const r of recs) {
-      for (const x of rowsOf(r)) {
-        const row = ws.addRow(def.columns.map((c) => cell(c.key, x[c.key], def.section)));
-        def.columns.forEach((c, i) => { if (MONEY_KEYS.has(c.key)) row.getCell(i + 1).numFmt = '0.00'; });
-      }
+    const rows = recs.flatMap(rowsOf);
+    if (def.section === 'hsn_b2b' || def.section === 'hsn_b2c') uniqueHsnDescs(rows);
+    for (const x of rows) {
+      const row = ws.addRow(def.columns.map((c) => cell(c.key, x[c.key], def.section)));
+      def.columns.forEach((c, i) => { if (MONEY_KEYS.has(c.key)) row.getCell(i + 1).numFmt = '0.00'; });
     }
     ws.columns = def.columns.map((c) => ({ width: Math.min(32, Math.max(10, c.headers[0].length + 2)) }));
   }

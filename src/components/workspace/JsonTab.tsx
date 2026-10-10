@@ -5,7 +5,18 @@ import { Button, Empty, Notice, Panel } from '@/components/ui';
 import { call, inr } from '@/lib/client';
 import type { ReturnDetail } from './types';
 
-interface Preview { meta: { sha256: string; sizeBytes: number; version: string; createdAt: string; stale: boolean; log: { sections: Record<string, { documents: number; taxableValue: number; tax: number }> } }; preview: unknown }
+interface Sec { documents: number; taxableValue: number; tax: number; igst?: number; cgst?: number; sgst?: number; cess?: number }
+interface Preview { meta: { sha256: string; sizeBytes: number; version: string; createdAt: string; stale: boolean; log: { sections: Record<string, Sec> } }; preview: unknown }
+
+/** The return's own tables, always listed (as in the billing software's GSTR-1 summary). */
+const MAIN: [string, string][] = [
+  ['b2b', 'B2B (B2B invoices)'], ['b2cl', 'B2CL (B2C invoices – large)'], ['b2cs', 'B2CS (B2C invoices – small)'],
+  ['cdnr', 'CDNR (credit / debit notes to registered persons)'], ['cdnur', 'CDNUR (credit / debit notes to unregistered persons)'],
+  ['exp', 'EXP (export invoices)'], ['nil', 'Nil rated / exempted / non-GST'],
+];
+/** Summaries of the same supplies – shown below the total, not added to it. */
+const MEMO: Record<string, string> = { hsn: 'HSN summary (Table 12)', doc_issue: 'Documents issued (Table 13)' };
+const ZERO: Sec = { documents: 0, taxableValue: 0, tax: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 };
 
 export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => void }) {
   const [loaded, setP] = useState<Preview | null>(null);
@@ -27,7 +38,25 @@ export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => vo
   }
 
   const raw = p ? JSON.stringify(p.preview, null, 2) : '';
-  const totals = p ? Object.values(p.meta.log.sections).reduce((a, s) => ({ tx: a.tx + s.taxableValue, tax: a.tax + s.tax }), { tx: 0, tax: 0 }) : null;
+  const secs = p?.meta.log.sections ?? {};
+  // JSON generated before the tax split was logged has only the tax total.
+  const split = Object.values(secs).every((s) => s.igst != null);
+  const rows: [string, Sec][] = [
+    ...MAIN.map(([k, label]): [string, Sec] => [label, secs[k] ?? ZERO]),
+    ...Object.entries(secs).filter(([k]) => !MAIN.some(([m]) => m === k) && !MEMO[k]).map(([k, s]): [string, Sec] => [k.toUpperCase(), s]),
+  ];
+  const memo = Object.entries(secs).filter(([k]) => MEMO[k]).map(([k, s]): [string, Sec] => [MEMO[k], s]);
+  const total = rows.reduce((a, [, s]) => ({
+    documents: a.documents + s.documents, taxableValue: a.taxableValue + s.taxableValue, tax: a.tax + s.tax,
+    igst: a.igst! + (s.igst ?? 0), cgst: a.cgst! + (s.cgst ?? 0), sgst: a.sgst! + (s.sgst ?? 0), cess: a.cess! + (s.cess ?? 0),
+  }), ZERO);
+  const line = (label: string, s: Sec, i: number | null, cls = '') => (
+    <tr key={label} className={cls}>
+      <td className="num">{i ?? ''}</td><td>{label}</td><td className="num text-right">{s.documents}</td><td className="num text-right">{inr(s.taxableValue)}</td>
+      {split ? <><td className="num text-right">{inr(s.igst ?? 0)}</td><td className="num text-right">{inr(s.cgst ?? 0)}</td><td className="num text-right">{inr(s.sgst ?? 0)}</td><td className="num text-right">{inr(s.cess ?? 0)}</td></>
+        : <td className="num text-right">{inr(s.tax)}</td>}
+    </tr>
+  );
 
   return (
     <div className="space-y-6">
@@ -51,13 +80,16 @@ export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => vo
           </dl>
           <div className="-mx-5 overflow-x-auto">
             <table className="ledger">
-              <thead><tr><th>JSON section</th><th className="text-right">Documents / lines</th><th className="text-right">Taxable value</th><th className="text-right">Tax incl. cess</th></tr></thead>
+              <thead><tr><th>S. No.</th><th>GSTR-1 type</th><th className="text-right">Number of records</th><th className="text-right">Taxable value (₹)</th>
+                {split ? <><th className="text-right">IGST</th><th className="text-right">CGST</th><th className="text-right">SGST/UTGST</th><th className="text-right">Cess</th></> : <th className="text-right">Tax incl. cess</th>}</tr></thead>
               <tbody>
-                {Object.entries(p.meta.log.sections).map(([k, s]) => <tr key={k}><td className="num">{k}</td><td className="num text-right">{s.documents}</td><td className="num text-right">{inr(s.taxableValue)}</td><td className="num text-right">{inr(s.tax)}</td></tr>)}
-                {totals && <tr className="font-semibold"><td colSpan={2}>Total (HSN rows repeat document values)</td><td className="num text-right">{inr(totals.tx)}</td><td className="num text-right">{inr(totals.tax)}</td></tr>}
+                {rows.map(([label, s], i) => line(label, s, i + 1))}
+                {line('Total', total, null, 'font-semibold')}
+                {memo.map(([label, s]) => line(label, s, null, 'text-ink-soft'))}
               </tbody>
             </table>
           </div>
+          {((secs.cdnr?.documents ?? 0) + (secs.cdnur?.documents ?? 0) > 0) && <p className="mt-3 text-[12.5px] text-ink-soft">The total adds the credit / debit note rows as they are – credit notes are not deducted from it.</p>}
           {showRaw && <pre className="num mt-4 max-h-[480px] overflow-auto rounded-md bg-ink p-4 text-[12px] text-white/90">{raw.length > 300_000 ? raw.slice(0, 300_000) + '\n… (truncated – download for the full file)' : raw}</pre>}
         </Panel>
       )}

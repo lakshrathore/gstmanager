@@ -45,7 +45,7 @@ const of = <S extends Section>(records: AnyRecord[], s: S) => records.filter((r)
 export interface GenerationLog {
   version: string;
   profile: string;
-  sections: Record<string, { documents: number; taxableValue: number; tax: number }>;
+  sections: Record<string, { documents: number; taxableValue: number; tax: number; igst?: number; cgst?: number; sgst?: number; cess?: number }>;
   generatedAt: string;
 }
 
@@ -58,6 +58,8 @@ export function generateGstr1Json(records: AnyRecord[], ctx: ReturnContext): { j
       documents: docs,
       taxableValue: round2(items.reduce((a, i) => a + (i.txval ?? i.adAmt ?? 0), 0)),
       tax: round2(items.reduce((a, i) => a + n(i.iamt) + n(i.camt) + n(i.samt) + n(i.csamt), 0)),
+      igst: round2(items.reduce((a, i) => a + n(i.iamt), 0)), cgst: round2(items.reduce((a, i) => a + n(i.camt), 0)),
+      sgst: round2(items.reduce((a, i) => a + n(i.samt), 0)), cess: round2(items.reduce((a, i) => a + n(i.csamt), 0)),
     };
   };
 

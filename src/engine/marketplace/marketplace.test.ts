@@ -411,6 +411,16 @@ describe('generic sales register and merging sources', () => {
     expect(big.issues.find((i) => i.severity === 'error' && i.field === 'hsn')?.message).toContain('1 line(s) have no HSN code – item(s): Unknown part');
   });
 
+  it('reports 0% sales as exempted when asked', () => {
+    const head = ['Ledger Name', 'Bill No', 'Bill Date', 'Place of Supply', 'GST No', 'Item Name', 'GST Rate', 'HSN', 'Qty', 'Unit', 'Taxable Amount'];
+    const t: SheetTable = { name: 'Sale Report', rows: [head, ['Cash', '1', '03-06-2025', 'Karnataka', '', 'Book', 0, '4901', 1, 'NOS', 500]] };
+    const lines = readMarketplaceTables([t], 's.xlsx', 'auto', profile.allowedRates).lines;
+    expect(of(buildMarketplaceRecords(lines, opts('generic')).records, 'nil').map((x) => x.data)).toEqual([{ splyTy: 'INTRAB2C', nilAmt: 500, exptAmt: 0, ngsupAmt: 0 }]);
+    const ex = buildMarketplaceRecords(lines, opts('generic', { zeroRate: 'exempt' }));
+    expect(of(ex.records, 'nil').map((x) => x.data)).toEqual([{ splyTy: 'INTRAB2C', nilAmt: 0, exptAmt: 500, ngsupAmt: 0 }]);
+    expect(validateReturn(ex.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
+  });
+
   it('gives each row of a repeated HSN its own description (the offline tool keys HSN + Description)', async () => {
     const hsn = (uqc: string, desc?: string): AnyRecord => ({
       section: 'hsn_b2c', key: `hsn_b2c|3004|${uqc}|5`, source: 'x',

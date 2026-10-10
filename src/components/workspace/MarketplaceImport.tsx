@@ -32,6 +32,9 @@ export function MarketplaceImport({ d, locked, onDone }: { d: ReturnDetail; lock
   const [files, setFiles] = useState<File[]>([]);
   const [etin, setEtin] = useState('');
   const [uqc, setUqc] = useState('NOS');
+  // The choice is the same every month for a business – remembered in this browser.
+  const [zeroRate, setZeroRate] = useState(() => { try { return localStorage.getItem('mp.zeroRate') === 'exempt' ? 'exempt' : 'nil'; } catch { return 'nil'; } });
+  const pickZeroRate = (v: string) => { setZeroRate(v); try { localStorage.setItem('mp.zeroRate', v); } catch { /* storage blocked */ } };
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<{ msg: string; details?: unknown } | null>(null);
   const imports = ((d.return as { marketplaceImports?: MarketplaceImportInfo[] }).marketplaceImports ?? []);
@@ -44,6 +47,7 @@ export function MarketplaceImport({ d, locked, onDone }: { d: ReturnDetail; lock
     fd.append('marketplace', mp);
     if (etin.trim()) fd.append('etin', etin.trim());
     fd.append('uqc', uqc);
+    fd.append('zeroRate', zeroRate);
     for (const f of files) fd.append('files', f);
     try {
       await call(`/api/returns/${d.return._id}/marketplace`, { method: 'POST', body: fd });
@@ -76,6 +80,12 @@ export function MarketplaceImport({ d, locked, onDone }: { d: ReturnDetail; lock
             <label>Unit for HSN summary <span className="font-normal">(when the file has no Unit column)</span>
               <select value={uqc} onChange={(e) => setUqc(e.target.value)}>
                 {Object.entries(UQC_CODES).map(([k, v]) => <option key={k} value={k}>{k} – {v}</option>)}
+              </select>
+            </label>
+            <label>0% sales are <span className="font-normal">(Table 8)</span>
+              <select value={zeroRate} onChange={(e) => pickZeroRate(e.target.value)}>
+                <option value="nil">Nil rated</option>
+                <option value="exempt">Exempted</option>
               </select>
             </label>
           </div>

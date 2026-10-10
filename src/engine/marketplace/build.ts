@@ -68,6 +68,8 @@ export interface BuildOptions {
   fp: string;
   quarterly?: boolean;
   hsnSplit: boolean;
+  /** How 0% supplies are reported in Table 8: nil-rated (default) or exempted. The report only says 0%. */
+  zeroRate?: 'nil' | 'exempt';
   /** Turnover above ₹5 crore: HSN is then mandatory for B2C supplies too (up to ₹5 crore, only for B2B). */
   aatoAbove5Cr?: boolean;
   b2clThreshold: number;
@@ -317,6 +319,8 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
   // 2. Nil-rated (0%) supplies → Table 8, by inter/intra-state and registered/unregistered buyer, net
   // of returns. They stay in the HSN summary at 0% but not in B2B/B2C, which take only taxable rates.
   const nilLines = lines.filter((l) => l.rate === 0);
+  const exempt = o.zeroRate === 'exempt';
+  const zeroName = exempt ? 'Exempted' : 'Nil-rated';
   if (nilLines.length) {
     const byType = new Map<string, SaleLine[]>();
     for (const l of nilLines) {
@@ -328,14 +332,14 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
       const net = round2(ls.reduce((a, l) => a + sign(l) * l.taxable, 0));
       if (net === 0) continue;
       if (net < 0) {
-        issue('warning', 'nil', 'nilAmt', `Nil-rated ${splyTy}: returns exceed this month’s sales (net ${money(net)}) – left out of Table 8`, { value: net });
+        issue('warning', 'nil', 'nilAmt', `${zeroName} ${splyTy}: returns exceed this month’s sales (net ${money(net)}) – left out of Table 8`, { value: net });
         continue;
       }
-      const data: NilData = { splyTy, nilAmt: net, exptAmt: 0, ngsupAmt: 0 };
+      const data: NilData = { splyTy, nilAmt: exempt ? 0 : net, exptAmt: exempt ? net : 0, ngsupAmt: 0 };
       records.push({ section: 'nil', key: `nil|${splyTy}|${o.source}`, source: src(ls), data } as AnyRecord);
     }
-    issue('warning', 'nil', 'nilAmt', `${nilLines.length} line(s) at 0% GST are reported as nil-rated supplies in Table 8`, {
-      suggestion: 'If these items are exempt (not nil-rated) or non-GST, edit the Table 8 row and move the amount to the Exempted or Non-GST column.',
+    issue('warning', 'nil', exempt ? 'exptAmt' : 'nilAmt', `${nilLines.length} line(s) at 0% GST are reported as ${exempt ? 'exempted' : 'nil-rated'} supplies in Table 8`, {
+      suggestion: `If these items are ${exempt ? 'nil-rated' : 'exempted'} instead, import again with "0% sales are" set to ${exempt ? 'Nil rated' : 'Exempted'}; for non-GST supplies, edit the Table 8 row and move the amount to the Non-GST column.`,
     });
   }
   const taxedLines = lines.filter((l) => l.rate !== 0);

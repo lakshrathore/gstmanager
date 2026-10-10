@@ -6,7 +6,7 @@ import { call, inr } from '@/lib/client';
 import type { ReturnDetail } from './types';
 
 interface Sec { documents: number; taxableValue: number; tax: number; igst?: number; cgst?: number; sgst?: number; cess?: number }
-interface Preview { meta: { sha256: string; sizeBytes: number; version: string; createdAt: string; stale: boolean; log: { sections: Record<string, Sec> } }; preview: unknown }
+interface Preview { meta: { sha256: string; sizeBytes: number; version: string; createdAt: string; stale: boolean; log: { sections: Record<string, Sec>; detail?: { hsnB2b?: Sec; hsnB2c?: Sec; docs?: { series: number; issued: number; cancelled: number; net: number } } } }; preview: unknown }
 
 /** The return's own tables, always listed (as in the billing software's GSTR-1 summary). */
 const MAIN: [string, string][] = [
@@ -45,7 +45,14 @@ export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => vo
     ...MAIN.map(([k, label]): [string, Sec] => [label, secs[k] ?? ZERO]),
     ...Object.entries(secs).filter(([k]) => !MAIN.some(([m]) => m === k) && !MEMO[k]).map(([k, s]): [string, Sec] => [k.toUpperCase(), s]),
   ];
-  const memo = Object.entries(secs).filter(([k]) => MEMO[k]).map(([k, s]): [string, Sec] => [MEMO[k], s]);
+  // Table 12 by side and Table 13 counts, when the JSON was generated with them; else one row each.
+  const det = p?.meta.log.detail;
+  const memo: [string, Sec][] = [
+    ...(det?.hsnB2b || det?.hsnB2c
+      ? [...(det.hsnB2b ? [['HSN summary – B2B (Table 12)', det.hsnB2b] as [string, Sec]] : []), ...(det.hsnB2c ? [['HSN summary – B2C (Table 12)', det.hsnB2c] as [string, Sec]] : [])]
+      : secs.hsn ? [[MEMO.hsn, secs.hsn] as [string, Sec]] : []),
+    ...(secs.doc_issue ? [[det?.docs ? `${MEMO.doc_issue} – ${det.docs.issued} issued, ${det.docs.cancelled} cancelled, net ${det.docs.net}` : MEMO.doc_issue, secs.doc_issue] as [string, Sec]] : []),
+  ];
   const total = rows.reduce((a, [, s]) => ({
     documents: a.documents + s.documents, taxableValue: a.taxableValue + s.taxableValue, tax: a.tax + s.tax,
     igst: a.igst! + (s.igst ?? 0), cgst: a.cgst! + (s.cgst ?? 0), sgst: a.sgst! + (s.sgst ?? 0), cess: a.cess! + (s.cess ?? 0),

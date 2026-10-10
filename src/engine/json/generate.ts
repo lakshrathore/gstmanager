@@ -47,6 +47,11 @@ export interface GenerationLog {
   profile: string;
   sections: Record<string, { documents: number; taxableValue: number; tax: number; igst?: number; cgst?: number; sgst?: number; cess?: number }>;
   generatedAt: string;
+  /** For the on-screen summary only: Table 12 by side and Table 13 counts (not compared with GSTN). */
+  detail?: {
+    hsnB2b?: GenerationLog['sections'][string]; hsnB2c?: GenerationLog['sections'][string];
+    docs?: { series: number; issued: number; cancelled: number; net: number };
+  };
 }
 
 export function generateGstr1Json(records: AnyRecord[], ctx: ReturnContext): { json: Json; log: GenerationLog } {
@@ -278,6 +283,15 @@ export function generateGstr1Json(records: AnyRecord[], ctx: ReturnContext): { j
     out.hsn = ctx.profile.hsnSplit
       ? { ...(hb2b.length ? { hsn_b2b: hb2b.map(hsnRow) } : {}), ...(hb2c.length ? { hsn_b2c: hb2c.map(hsnRow) } : {}) }
       : { data: [...hb2b, ...hb2c].map(hsnRow) };
+    log.detail = {};
+    if (ctx.profile.hsnSplit) {
+      for (const [k, rs] of [['hsnB2b', hb2b], ['hsnB2c', hb2c]] as const) {
+        if (!rs.length) continue;
+        tally('_', rs.length, rs.map((r) => r.data));
+        log.detail[k] = log.sections._;
+        delete log.sections._;
+      }
+    }
     tally('hsn', hb2b.length + hb2c.length, [...hb2b, ...hb2c].map((r) => r.data));
   }
 
@@ -294,6 +308,8 @@ export function generateGstr1Json(records: AnyRecord[], ctx: ReturnContext): { j
       })),
     };
     log.sections.doc_issue = { documents: docs.length, taxableValue: 0, tax: 0 };
+    const issued = docs.reduce((a, r) => a + (r.data.totnum ?? 0), 0), cancelled = docs.reduce((a, r) => a + (r.data.cancel ?? 0), 0);
+    log.detail = { ...log.detail, docs: { series: docs.length, issued, cancelled, net: issued - cancelled } };
   }
 
   return { json: out, log };

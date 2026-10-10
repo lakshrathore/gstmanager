@@ -18,6 +18,24 @@ const MAIN: [string, string][] = [
 const MEMO: Record<string, string> = { hsn: 'HSN summary (Table 12)', doc_issue: 'Documents issued (Table 13)' };
 const ZERO: Sec = { documents: 0, taxableValue: 0, tax: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 };
 
+type Detail = NonNullable<Preview['meta']['log']['detail']>;
+/** The same figures read from the JSON itself – for a JSON generated before they were logged. */
+function detailFromJson(json: unknown): Detail {
+  const j = (json ?? {}) as { hsn?: Record<string, unknown>; doc_issue?: { doc_det?: { docs?: { totnum?: number; cancel?: number }[] }[] } };
+  const side = (rows: unknown): Sec | undefined => {
+    if (!Array.isArray(rows) || !rows.length) return undefined;
+    const sum = (k: string) => Math.round(rows.reduce((a: number, r: Record<string, number>) => a + (Number(r[k]) || 0), 0) * 100) / 100;
+    const s = { documents: rows.length, taxableValue: sum('txval'), igst: sum('iamt'), cgst: sum('camt'), sgst: sum('samt'), cess: sum('csamt') };
+    return { ...s, tax: s.igst + s.cgst + s.sgst + s.cess };
+  };
+  const series = (j.doc_issue?.doc_det ?? []).flatMap((d) => d.docs ?? []);
+  const issued = series.reduce((a, d) => a + (d.totnum ?? 0), 0), cancelled = series.reduce((a, d) => a + (d.cancel ?? 0), 0);
+  return {
+    hsnB2b: side(j.hsn?.hsn_b2b), hsnB2c: side(j.hsn?.hsn_b2c),
+    docs: series.length ? { series: series.length, issued, cancelled, net: issued - cancelled } : undefined,
+  };
+}
+
 export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => void }) {
   const [loaded, setP] = useState<Preview | null>(null);
   const p = d.return.currentJsonId ? loaded : null;
@@ -46,7 +64,7 @@ export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => vo
     ...Object.entries(secs).filter(([k]) => !MAIN.some(([m]) => m === k) && !MEMO[k]).map(([k, s]): [string, Sec] => [k.toUpperCase(), s]),
   ];
   // Table 12 by side and Table 13 counts, when the JSON was generated with them; else one row each.
-  const det = p?.meta.log.detail;
+  const det = p?.meta.log.detail ?? (p ? detailFromJson(p.preview) : undefined);
   const memo: [string, Sec][] = [
     ...(det?.hsnB2b || det?.hsnB2c
       ? [...(det.hsnB2b ? [['HSN summary – B2B (Table 12)', det.hsnB2b] as [string, Sec]] : []), ...(det.hsnB2c ? [['HSN summary – B2C (Table 12)', det.hsnB2c] as [string, Sec]] : [])]

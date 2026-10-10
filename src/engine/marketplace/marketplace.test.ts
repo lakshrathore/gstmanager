@@ -391,6 +391,22 @@ describe('generic sales register and merging sources', () => {
     expect(validateReturn(back.records, ctx).issues.filter((i) => i.severity === 'error')).toEqual([]);
   });
 
+  it('repairs HSN codes: wrong length cut to its first digits, a blank one taken from the same item', () => {
+    const head = ['Ledger Name', 'Bill No', 'Bill Date', 'Place of Supply', 'GST No', 'Item Name', 'GST Rate', 'HSN', 'Qty', 'Unit', 'Taxable Amount'];
+    const row = (bill: string, item: string, hsn: string) => ['Cash', bill, '03-06-2025', 'Karnataka', '', item, 18, hsn, 1, 'NOS', 100];
+    const t: SheetTable = { name: 'Sale Report', rows: [head,
+      row('1', 'Brake shoe', '8714109028'), row('2', 'Bearing', '8482400'), row('3', 'Switch', '853650090'), row('4', 'Chain', '87141'),
+      row('5', 'Bearing', ''), row('6', 'Unknown part', ''), row('7', 'Plug', '85111000')] };
+    const out = buildMarketplaceRecords(readMarketplaceTables([t], 's.xlsx', 'auto', profile.allowedRates).lines, opts('generic'));
+    const rows = of(out.records, 'hsn_b2c').map((x) => x.data as { hsn: string; txval: number });
+    expect(rows.map((x) => x.hsn).sort()).toEqual(['', '848240', '85111000', '853650', '8714', '871410']);
+    expect(rows.find((x) => x.hsn === '848240')?.txval).toBe(200);
+    const msgs = out.issues.filter((i) => i.field === 'hsn').map((i) => `${i.severity}: ${i.message}`);
+    expect(msgs).toEqual(expect.arrayContaining([
+      expect.stringContaining('warning: 4 HSN code(s) with a wrong number of digits'), expect.stringContaining('Bearing → 8482400'),
+      expect.stringContaining('error: 1 line(s) have no HSN code – item(s): Unknown part')]));
+  });
+
   it('gives each row of a repeated HSN its own description (the offline tool keys HSN + Description)', async () => {
     const hsn = (uqc: string, desc?: string): AnyRecord => ({
       section: 'hsn_b2c', key: `hsn_b2c|3004|${uqc}|5`, source: 'x',

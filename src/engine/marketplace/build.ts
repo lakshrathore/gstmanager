@@ -457,15 +457,58 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
   // 5. Table 12 – HSN summary
   const hsnSection = (l: SaleLine): 'hsn_b2b' | 'hsn_b2c' => (o.hsnSplit && !isB2b(l) ? 'hsn_b2c' : 'hsn_b2b');
   const hsnGroups = new Map<string, SaleLine[]>();
-  let noHsn = 0;
+  // HSN codes as typed in the billing software: a blank one is taken from another line of the same
+  // item; a code of the wrong length (5, 7, 9+ digits – an extra or missing digit) is cut to the
+  // 4- or 6-digit code it starts with, which is a valid level of the same tariff entry.
+  const digits = (l: SaleLine) => (l.hsn || '').replace(/\D/g, '');
+  const itemKey = (l: SaleLine) => (l.description || '').trim().toUpperCase();
+  const byItem = new Map<string, Map<string, number>>();
   for (const l of lines) {
-    const hsn = (l.hsn || '').replace(/\D/g, '');
+    const h = digits(l), it = itemKey(l);
+    if (!h || !it) continue;
+    if (!byItem.has(it)) byItem.set(it, new Map());
+    byItem.get(it)!.set(h, (byItem.get(it)!.get(h) ?? 0) + 1);
+  }
+  const filled = new Map<string, string>();
+  const trimmed = new Map<string, string>();
+  const blankItems = new Set<string>();
+  const fixedHsn = new Map<SaleLine, string>();
+  for (const l of lines) {
+    let h = digits(l);
+    if (!h) {
+      const seen = byItem.get(itemKey(l));
+      if (seen) { h = [...seen].sort((a, b) => b[1] - a[1])[0][0]; filled.set(l.description!.trim(), h); }
+      else if (l.description) blankItems.add(l.description.trim());
+    }
+    if (h && ![4, 6, 8].includes(h.length) && h.length > 4) {
+      const cut = h.slice(0, h.length === 5 ? 4 : 6);
+      trimmed.set(h, cut);
+      h = cut;
+    }
+    fixedHsn.set(l, h);
+  }
+  const some = (xs: string[]) => `${xs.slice(0, 8).join(', ')}${xs.length > 8 ? ' …' : ''}`;
+  const hsnSec = o.hsnSplit ? 'hsn_b2c' : 'hsn_b2b';
+  if (trimmed.size) {
+    issue('warning', hsnSec, 'hsn', `${trimmed.size} HSN code(s) with a wrong number of digits reported by their first digits: ${some([...trimmed].map(([a, b]) => `${a} → ${b}`))}`, {
+      suggestion: 'HSN is 4, 6 or 8 digits. Check these codes and correct them in the item master of your billing software.',
+    });
+  }
+  if (filled.size) {
+    issue('warning', hsnSec, 'hsn', `HSN missing on some lines of ${filled.size} item(s) – taken from the same item's other bills: ${some([...filled].map(([a, b]) => `${a} → ${b}`))}`, {
+      suggestion: 'Fill the HSN in the item master of your billing software.',
+    });
+  }
+  let noHsn = 0;
+  for (const l0 of lines) {
+    const hsn = fixedHsn.get(l0) ?? '';
+    const l = hsn === l0.hsn ? l0 : { ...l0, hsn };
     if (!hsn) noHsn++;
     const k = `${hsnSection(l)}|${hsn}|${l.uqc || o.uqc}|${l.rate}`;
     if (!hsnGroups.has(k)) hsnGroups.set(k, []);
     hsnGroups.get(k)!.push(l);
   }
-  if (noHsn) issue('error', o.hsnSplit ? 'hsn_b2c' : 'hsn_b2b', 'hsn', `${noHsn} line(s) have no HSN code`, { suggestion: 'They are grouped under a blank HSN – edit that HSN line to the correct code.' });
+  if (noHsn) issue('error', o.hsnSplit ? 'hsn_b2c' : 'hsn_b2b', 'hsn', `${noHsn} line(s) have no HSN code${blankItems.size ? ` – item(s): ${some([...blankItems])}` : ''}`, { suggestion: 'They are grouped under a blank HSN – edit that HSN line to the correct code, or fill the HSN of these items in your billing software and import again.' });
   for (const [k, ls] of hsnGroups) {
     const [section, hsn, uqc] = k.split('|') as ['hsn_b2b' | 'hsn_b2c', string, string];
     let inter = 0, intra = 0, qty = 0, cess = 0;

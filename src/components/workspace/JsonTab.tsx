@@ -40,7 +40,7 @@ export function JsonTab({ d, onChanged }: { d: ReturnDetail; onChanged: () => vo
   const raw = p ? JSON.stringify(p.preview, null, 2) : '';
   const secs = p?.meta.log.sections ?? {};
   // JSON generated before the tax split was logged has only the tax total.
-  const split = Object.values(secs).every((s) => s.igst != null);
+  const split = Object.values(secs).some((s) => s.igst != null);
   const rows: [string, Sec][] = [
     ...MAIN.map(([k, label]): [string, Sec] => [label, secs[k] ?? ZERO]),
     ...Object.entries(secs).filter(([k]) => !MAIN.some(([m]) => m === k) && !MEMO[k]).map(([k, s]): [string, Sec] => [k.toUpperCase(), s]),

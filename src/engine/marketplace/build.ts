@@ -68,6 +68,8 @@ export interface BuildOptions {
   fp: string;
   quarterly?: boolean;
   hsnSplit: boolean;
+  /** Turnover above ₹5 crore: HSN is then mandatory for B2C supplies too (up to ₹5 crore, only for B2B). */
+  aatoAbove5Cr?: boolean;
   b2clThreshold: number;
   allowedRates: number[];
   /** E-commerce operator GSTIN (TCS registration of the marketplace in the seller's state). */
@@ -471,14 +473,12 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
   }
   const filled = new Map<string, string>();
   const trimmed = new Map<string, string>();
-  const blankItems = new Set<string>();
   const fixedHsn = new Map<SaleLine, string>();
   for (const l of lines) {
     let h = digits(l);
     if (!h) {
       const seen = byItem.get(itemKey(l));
       if (seen) { h = [...seen].sort((a, b) => b[1] - a[1])[0][0]; filled.set(l.description!.trim(), h); }
-      else if (l.description) blankItems.add(l.description.trim());
     }
     if (h && ![4, 6, 8].includes(h.length) && h.length > 4) {
       const cut = h.slice(0, h.length === 5 ? 4 : 6);
@@ -499,16 +499,28 @@ export function buildMarketplaceRecords(input: SaleLine[], o: BuildOptions, docL
       suggestion: 'Fill the HSN in the item master of your billing software.',
     });
   }
-  let noHsn = 0;
+  // Lines still without an HSN. Up to ₹5 crore turnover HSN is optional for B2C supplies, so those
+  // lines are left out of Table 12; otherwise they are an error under a blank HSN line.
+  const names = (ls: SaleLine[]) => { const n = [...new Set(ls.map((l) => l.description?.trim()).filter((x): x is string => !!x))]; return n.length ? ` – item(s): ${n.slice(0, 100).join(', ')}${n.length > 100 ? ' …' : ''}` : ''; };
+  const noHsn: SaleLine[] = [], leftOut: SaleLine[] = [];
   for (const l0 of lines) {
     const hsn = fixedHsn.get(l0) ?? '';
     const l = hsn === l0.hsn ? l0 : { ...l0, hsn };
-    if (!hsn) noHsn++;
+    if (!hsn) {
+      if (!o.aatoAbove5Cr && !isB2b(l)) { leftOut.push(l); continue; }
+      noHsn.push(l);
+    }
     const k = `${hsnSection(l)}|${hsn}|${l.uqc || o.uqc}|${l.rate}`;
     if (!hsnGroups.has(k)) hsnGroups.set(k, []);
     hsnGroups.get(k)!.push(l);
   }
-  if (noHsn) issue('error', o.hsnSplit ? 'hsn_b2c' : 'hsn_b2b', 'hsn', `${noHsn} line(s) have no HSN code${blankItems.size ? ` – item(s): ${some([...blankItems])}` : ''}`, { suggestion: 'They are grouped under a blank HSN – edit that HSN line to the correct code, or fill the HSN of these items in your billing software and import again.' });
+  if (leftOut.length) {
+    const net = round2(leftOut.reduce((a, l) => a + (l.kind === 'return' ? -l.taxable : l.taxable), 0));
+    issue('warning', hsnSec, 'hsn', `${leftOut.length} B2C line(s) without an HSN code (taxable ${money(net)}) left out of the HSN summary${names(leftOut)}`, {
+      suggestion: 'HSN is optional for B2C supplies up to ₹5 crore turnover, so the return can be filed; the HSN (B2C) total is lower than B2C sales by this amount. Fill the HSN of these items in your billing software to include them.',
+    });
+  }
+  if (noHsn.length) issue('error', noHsn.some((l) => hsnSection(l) === 'hsn_b2b') ? 'hsn_b2b' : 'hsn_b2c', 'hsn', `${noHsn.length} line(s) have no HSN code${names(noHsn)}`, { suggestion: 'They are grouped under a blank HSN – edit that HSN line to the correct code, or fill the HSN of these items in your billing software and import again.' });
   for (const [k, ls] of hsnGroups) {
     const [section, hsn, uqc] = k.split('|') as ['hsn_b2b' | 'hsn_b2c', string, string];
     let inter = 0, intra = 0, qty = 0, cess = 0;

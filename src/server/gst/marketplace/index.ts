@@ -82,7 +82,7 @@ export async function importMarketplace(
   const source = `mp:${marketplace}`;
   const built = buildMarketplaceRecords(lines, {
     marketplace, source, supplierGstin: company.gstin, fp: ret.fp, quarterly: !!ret.quarterly,
-    hsnSplit: ctx.profile.hsnSplit, b2clThreshold: ctx.profile.b2clThreshold, allowedRates: ctx.profile.allowedRates, etin, uqc,
+    hsnSplit: ctx.profile.hsnSplit, aatoAbove5Cr: ctx.aatoAbove5Cr, b2clThreshold: ctx.profile.b2clThreshold, allowedRates: ctx.profile.allowedRates, etin, uqc,
   }, docs);
   if (!built.records.length) throw new HttpError(422, `No lines for ${company.gstin} in these files (${built.summary.otherGstinLines} line(s) are for other GSTINs)`);
   // Own billing software: sales through no e-commerce operator, so no Type E reminder.

@@ -399,12 +399,16 @@ describe('generic sales register and merging sources', () => {
       row('5', 'Bearing', ''), row('6', 'Unknown part', ''), row('7', 'Plug', '85111000')] };
     const out = buildMarketplaceRecords(readMarketplaceTables([t], 's.xlsx', 'auto', profile.allowedRates).lines, opts('generic'));
     const rows = of(out.records, 'hsn_b2c').map((x) => x.data as { hsn: string; txval: number });
-    expect(rows.map((x) => x.hsn).sort()).toEqual(['', '848240', '85111000', '853650', '8714', '871410']);
+    expect(rows.map((x) => x.hsn).sort()).toEqual(['848240', '85111000', '853650', '8714', '871410']);
     expect(rows.find((x) => x.hsn === '848240')?.txval).toBe(200);
     const msgs = out.issues.filter((i) => i.field === 'hsn').map((i) => `${i.severity}: ${i.message}`);
     expect(msgs).toEqual(expect.arrayContaining([
       expect.stringContaining('warning: 4 HSN code(s) with a wrong number of digits'), expect.stringContaining('Bearing → 8482400'),
-      expect.stringContaining('error: 1 line(s) have no HSN code – item(s): Unknown part')]));
+      expect.stringContaining('warning: 1 B2C line(s) without an HSN code (taxable ₹100) left out of the HSN summary – item(s): Unknown part')]));
+    // Above ₹5 crore HSN is mandatory for B2C too: the line stays, as an error.
+    const big = buildMarketplaceRecords(readMarketplaceTables([t], 's.xlsx', 'auto', profile.allowedRates).lines, opts('generic', { aatoAbove5Cr: true }));
+    expect(of(big.records, 'hsn_b2c').some((x) => (x.data as { hsn: string }).hsn === '')).toBe(true);
+    expect(big.issues.find((i) => i.severity === 'error' && i.field === 'hsn')?.message).toContain('1 line(s) have no HSN code – item(s): Unknown part');
   });
 
   it('gives each row of a repeated HSN its own description (the offline tool keys HSN + Description)', async () => {
